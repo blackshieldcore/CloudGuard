@@ -4,7 +4,7 @@ A lightweight, dependency-free Python tool that scans AWS IAM policy documents f
 
 ## Why this exists
 
-IAM over-permissioning is the #1 cloud security risk. Tools like AWS Access Analyzer exist but are account-bound — they can't scan a policy *before* it's deployed, and they don't flag privilege-escalation chains. CloudGuard fills that gap: it reads raw IAM policy JSON files and flags risks *offline*, making it useful in code review, CI pipelines, and pre-deployment checks.
+IAM over-permissioning is the #1 cloud security risk. Tools like AWS Access Analyzer exist but are account-bound they can't scan a policy *before* it's deployed, and they don't flag privilege-escalation chains. CloudGuard fills that gap: it reads raw IAM policy JSON files and flags risks *offline*, making it useful in code review, CI pipelines, and pre-deployment checks.
 
 ## What it detects
 
@@ -72,15 +72,15 @@ This makes CloudGuard usable as a CI/CD gate: add it to your pipeline and block 
 ## Requirements
 
 - Python 3.7+
-- **Zero external dependencies** — uses only the Python standard library. Runs anywhere Python runs.
+- **Zero external dependencies** uses only the Python standard library. Runs anywhere Python runs.
 
 ## Design decisions
 
 - **Offline-first**: Scans JSON files, not live AWS accounts. This means it works in code review, pre-deployment, and air-gapped environments.
-- **No dependencies**: Deliberate choice — the tool should run on any machine without `pip install` or version conflicts. Security tooling that introduces supply-chain dependencies defeats the purpose.
+- **No dependencies**: Deliberate choice the tool should run on any machine without `pip install` or version conflicts. Security tooling that introduces supply-chain dependencies defeats the purpose.
 - **Severity-based filtering**: Findings are ranked CRITICAL → INFO so teams can focus on what matters. The `--severity` flag lets CI pipelines set their own threshold.
 - **Exit codes for automation**: Returns 1 on CRITICAL/HIGH findings, making it a drop-in CI gate.
-- **Extensible rules**: Each check is an independent function. Adding a new rule means writing one function and appending it to `ALL_RULES` — no framework, no config files.
+- **Extensible rules**: Each check is an independent function. Adding a new rule means writing one function and appending it to `ALL_RULES` no framework, no config files.
 
 ## Adding custom rules
 

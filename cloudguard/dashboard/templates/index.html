@@ -390,6 +390,12 @@ function buildCytoscape() {
     return;
   }
 
+  const container = document.getElementById('cy');
+  if (!container) {
+    showFallbackState();
+    return;
+  }
+
   // 15-second render timeout fallback
   renderTimer = setTimeout(() => {
     if (!cyReadyFired) {
@@ -456,7 +462,7 @@ function buildCytoscape() {
 
   try {
     cy = cytoscape({
-      container: document.getElementById('cy'),
+      container: container,
       elements,
       style: [
         {
@@ -558,49 +564,58 @@ function buildCytoscape() {
       maxZoom: 4,
     });
 
+    if (!cy) {
+      showFallbackState();
+      return;
+    }
+
     cy.ready(function() {
       cyReadyFired = true;
       if (renderTimer) clearTimeout(renderTimer);
       hideSpinner();
     });
+
+    // Node click → show detail
+    cy.on('tap', 'node', function(evt) {
+      const node = evt.target;
+      showNodeDetail(node);
+      switchTab('node');
+    });
+
+    // Background click → clear highlight
+    cy.on('tap', function(evt) {
+      if (evt.target === cy) {
+        clearHighlight();
+      }
+    });
+
+    // Hover tooltip
+    cy.on('mouseover', 'node', function(evt) {
+      const node = evt.target;
+      const tip = document.getElementById('tooltip');
+      if (tip) {
+        tip.style.display = 'block';
+        document.getElementById('tt-type').textContent = node.data('type')?.toUpperCase() || '';
+        document.getElementById('tt-label').textContent = node.data('fullLabel') || node.data('label');
+      }
+    });
+
+    cy.on('mouseout', 'node', function() {
+      const tip = document.getElementById('tooltip');
+      if (tip) tip.style.display = 'none';
+    });
+
+    cy.on('mousemove', function(evt) {
+      const tip = document.getElementById('tooltip');
+      if (tip && tip.style.display === 'block') {
+        tip.style.left = (evt.originalEvent.clientX + 12) + 'px';
+        tip.style.top  = (evt.originalEvent.clientY - 8) + 'px';
+      }
+    });
   } catch (err) {
+    console.error('Cytoscape initialization error:', err);
     showFallbackState();
   }
-
-  // Node click → show detail
-  cy.on('tap', 'node', function(evt) {
-    const node = evt.target;
-    showNodeDetail(node);
-    switchTab('node');
-  });
-
-  // Background click → clear highlight
-  cy.on('tap', function(evt) {
-    if (evt.target === cy) {
-      clearHighlight();
-    }
-  });
-
-  // Hover tooltip
-  cy.on('mouseover', 'node', function(evt) {
-    const node = evt.target;
-    const tip = document.getElementById('tooltip');
-    tip.style.display = 'block';
-    document.getElementById('tt-type').textContent = node.data('type')?.toUpperCase() || '';
-    document.getElementById('tt-label').textContent = node.data('fullLabel') || node.data('label');
-  });
-
-  cy.on('mouseout', 'node', function() {
-    document.getElementById('tooltip').style.display = 'none';
-  });
-
-  cy.on('mousemove', function(evt) {
-    const tip = document.getElementById('tooltip');
-    if (tip.style.display === 'block') {
-      tip.style.left = (evt.originalEvent.clientX + 12) + 'px';
-      tip.style.top  = (evt.originalEvent.clientY - 8) + 'px';
-    }
-  });
 }
 
 /* ── Path highlighting ─────────────────────────────────────── */

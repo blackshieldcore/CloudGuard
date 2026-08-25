@@ -165,17 +165,6 @@
       <button class="ctrl-btn" id="btn-zoom-out" title="Zoom out">−</button>
       <button class="ctrl-btn" id="btn-layout"  title="Re-layout">⟳</button>
     </div>
-
-    <!-- Legend -->
-    <div id="legend">
-      <h4>Node Types</h4>
-      <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div> Policy (CRITICAL)</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#d29922"></div> Policy (HIGH)</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#e3b341"></div> Policy (MEDIUM)</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div> Policy (Clean)</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div> Action</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#bc8cff; border-radius:2px"></div> Resource</div>
-    </div>
   </main>
 </div>
 
@@ -263,55 +252,23 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-/* Helper functions for UI state */
-function hideSpinner() {
-  const spinner = document.getElementById('loading-spinner');
-  if (spinner) spinner.style.display = 'none';
-}
-
-function showEmptyState() {
-  hideSpinner();
-  const graphEl = document.getElementById('d3-graph');
-  if (graphEl) graphEl.style.display = 'none';
-  const emptyEl = document.getElementById('empty-graph');
-  if (emptyEl) emptyEl.style.display = 'flex';
-}
-
-function showFallbackState() {
-  hideSpinner();
-  const graphEl = document.getElementById('d3-graph');
-  if (graphEl) graphEl.style.display = 'none';
-  const fallbackEl = document.getElementById('graph-fallback');
-  if (fallbackEl) fallbackEl.style.display = 'flex';
-}
-
-function checkWarningBanner() {
-  if (GRAPH_DATA && GRAPH_DATA.is_trimmed) {
-    const banner = document.getElementById('warning-banner');
-    if (banner) banner.style.display = 'flex';
-  }
-}
-
 /* ── Build header stats ────────────────────────────────────── */
 function buildHeaderStats() {
   const el = document.getElementById('header-stats');
-  const chips = [
-    { cls:'critical', num: SUMMARY.critical, label:'CRITICAL', filter:'CRITICAL' },
-    { cls:'high',     num: SUMMARY.high,     label:'HIGH',     filter:'HIGH' },
-    { cls:'medium',   num: SUMMARY.medium,   label:'MEDIUM',   filter:'MEDIUM' },
-    { cls:'paths',    num: PATHS.length,     label:'Paths',    action:'paths' },
-  ];
-  el.innerHTML = chips.map(c => `
-    <div class="stat-chip ${c.cls}" data-filter="${c.filter||''}" data-action="${c.action||''}">
-      <span class="stat-num">${c.num}</span>
-      <span class="stat-label">${c.label}</span>
-    </div>
-  `).join('');
+  el.innerHTML = `
+    <span class="stat-item" data-filter="CRITICAL"><strong style="color:#da3633">${SUMMARY.critical}</strong> critical</span>
+    <span class="stat-sep">·</span>
+    <span class="stat-item" data-filter="HIGH"><strong style="color:#9a6700">${SUMMARY.high}</strong> high</span>
+    <span class="stat-sep">·</span>
+    <span class="stat-item" data-filter="MEDIUM"><strong style="color:#6e7681">${SUMMARY.medium}</strong> medium</span>
+    <span class="stat-sep">·</span>
+    <span class="stat-item" data-action="paths"><strong style="color:#57606a">${PATHS.length}</strong> paths</span>
+  `;
 
-  el.querySelectorAll('.stat-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      const a = chip.dataset.action;
-      const f = chip.dataset.filter;
+  el.querySelectorAll('.stat-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const a = item.dataset.action;
+      const f = item.dataset.filter;
       if (a === 'paths') { switchTab('paths'); return; }
       if (f) { switchTab('findings'); setSevFilter(f); }
     });
@@ -337,26 +294,26 @@ function renderFindings() {
     return;
   }
 
-  const SEV_ICON = {
-    CRITICAL: '🔴',
-    HIGH:     '🟠',
-    MEDIUM:   '🟡',
-    LOW:      '🟢',
-    INFO:     '🔵'
+  const SEV_COLOR_TXT = {
+    CRITICAL: '#da3633',
+    HIGH:     '#9a6700',
+    MEDIUM:   '#6e7681',
+    LOW:      '#57606a',
+    INFO:     '#57606a'
   };
 
   list.innerHTML = filtered.map((f, i) => {
     const file = String(f.policy_file).split(/[\\/]/).pop();
-    const icon = SEV_ICON[f.severity] || '⚪';
+    const color = SEV_COLOR_TXT[f.severity] || '#57606a';
     return `
       <div class="finding-card ${sevClass(f.severity)}"
            data-idx="${i}"
-           style="animation-delay:${i*40}ms"
+           style="border-left: 2px solid ${color};"
            title="${escHtml(f.detail)}">
         <div class="finding-header">
-          <span class="sev-badge ${f.severity}">${icon} ${f.severity}</span>
+          <span class="sev-badge-txt" style="color:${color}">${f.severity}</span>
           <span class="finding-rule">${f.rule_id}</span>
-          <span class="finding-title ${f.severity}">${escHtml(f.title)}</span>
+          <span class="finding-title">${escHtml(f.title)}</span>
         </div>
         <div class="finding-meta">${escHtml(file)} · Stmt #${f.statement_index}</div>
       </div>
@@ -382,10 +339,10 @@ function renderPaths() {
     const parts = p.readable.split(' → ');
     const readableHtml = parts.map((part, j) => {
       const isLast = j === parts.length - 1;
-      return `<span style="color:${isLast ? '#f85149' : '#e6edf3'}">${escHtml(part)}</span>${!isLast ? ' <span class="path-arrow">→</span> ' : ''}`;
+      return `<span style="color:${isLast ? '#da3633' : '#c9d1d9'}">${escHtml(part)}</span>${!isLast ? ' <span class="path-arrow">→</span> ' : ''}`;
     }).join('');
     return `
-      <div class="path-card" data-idx="${i}" style="animation-delay:${i*40}ms">
+      <div class="path-card" data-idx="${i}">
         <div class="path-hops">⚡ ${p.hops} hop${p.hops !== 1 ? 's' : ''}</div>
         <div class="path-readable">${readableHtml}</div>
       </div>
@@ -420,16 +377,6 @@ function setSevFilter(sev) {
   renderFindings();
 }
 
-/* ── Draw Bezier Curves ────────────────────────────────────── */
-function drawQuadraticBezier(src, tgt) {
-  const x1 = src.x || 0, y1 = src.y || 0;
-  const x2 = tgt.x || 0, y2 = tgt.y || 0;
-  const dx = x2 - x1, dy = y2 - y1;
-  const cx = (x1 + x2) / 2 - dy * 0.15;
-  const cy = (y1 + y2) / 2 + dx * 0.15;
-  return `M ${x1},${y1} Q ${cx},${cy} ${x2},${y2}`;
-}
-
 /* ── Main D3 Graph Implementation ───────────────────────────── */
 function buildD3Graph() {
   checkWarningBanner();
@@ -447,7 +394,6 @@ function buildD3Graph() {
     return;
   }
 
-  // 15-second render timeout fallback
   renderTimer = setTimeout(() => {
     if (!d3ReadyFired) {
       showFallbackState();
@@ -460,28 +406,6 @@ function buildD3Graph() {
 
     svgEl.selectAll('*').remove(); // Clear prior renders
 
-    // Arrow markers definitions
-    const defs = svgEl.append('defs');
-
-    function createMarker(id, color) {
-      defs.append('marker')
-        .attr('id', id)
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 8)
-        .attr('refY', 0)
-        .attr('markerWidth', 6)
-        .attr('markerHeight', 6)
-        .attr('orient', 'auto')
-        .append('path')
-        .attr('d', 'M0,-5L10,0L0,5')
-        .attr('fill', color);
-    }
-
-    createMarker('arrow-default', '#30363d');
-    createMarker('arrow-high-risk', '#cf222e');
-    createMarker('arrow-highlighted', '#2f81f7');
-
-    // Setup zoom behavior
     zoomBehavior = d3.zoom()
       .scaleExtent([0.2, 4])
       .on('zoom', (event) => {
@@ -490,19 +414,16 @@ function buildD3Graph() {
 
     svgEl.call(zoomBehavior);
 
-    // Main graph container group
     gContainer = svgEl.append('g').attr('id', 'graph-container');
     gLinks = gContainer.append('g').attr('class', 'links');
     gNodes = gContainer.append('g').attr('class', 'nodes');
 
-    // Background click to clear highlights
     svgEl.on('click', function(event) {
       if (event.target === this || event.target.tagName === 'svg' || event.target.id === 'graph-container') {
         clearHighlight();
       }
     });
 
-    // Policy worst severity mapping
     const policyWorstSev = {};
     FINDINGS.forEach(f => {
       const key = String(f.policy_file);
@@ -511,7 +432,6 @@ function buildD3Graph() {
       if (!cur || ord[f.severity] > ord[cur]) policyWorstSev[key] = f.severity;
     });
 
-    // Deep clone nodes & links for D3 force simulation
     d3Nodes = gd.nodes.map(n => {
       const pSev = policyWorstSev[n.label] || policyWorstSev[n.id.replace('policy:','')] || 'CLEAN';
       return {
@@ -538,34 +458,29 @@ function buildD3Graph() {
       };
     }).filter(e => nodeMap.has(e.source) && nodeMap.has(e.target));
 
-    // Staged force simulation with updated enterprise parameters
     simulation = d3.forceSimulation(d3Nodes)
-      .force('link', d3.forceLink(d3Links).id(d => d.id).distance(d => (d.target.type === 'policy' || d.source.type === 'policy') ? 220 : d.target.type === 'action' ? 80 : 60))
-      .force('charge', d3.forceManyBody().strength(-800))
+      .force('link', d3.forceLink(d3Links).id(d => d.id).distance(d => (d.target.type === 'policy' || d.source.type === 'policy') ? 140 : d.target.type === 'action' ? 70 : 50))
+      .force('charge', d3.forceManyBody().strength(-600))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collide', d3.forceCollide().radius(d => d.type === 'policy' ? 110 : d.type === 'action' ? 50 : 40));
+      .force('collide', d3.forceCollide().radius(d => d.type === 'policy' ? 60 : d.type === 'action' ? 30 : 20));
 
-    // Synchronously run 300 ticks to settle layout
     simulation.tick(300);
     simulation.stop();
 
-    // Render Edges (solid high-risk edges in #cf222e, normal edges in #30363d)
     const linkElements = gLinks.selectAll('path')
       .data(d3Links)
       .enter()
       .append('path')
-      .attr('class', d => `link ${d.is_high_risk ? 'high-risk' : ''}`)
-      .attr('stroke', d => d.is_high_risk ? '#cf222e' : '#30363d')
-      .attr('stroke-width', d => d.is_high_risk ? 1.5 : 1)
-      .attr('stroke-opacity', d => d.is_high_risk ? 0.6 : 0.35)
+      .attr('class', 'link')
+      .attr('stroke', '#21262d')
+      .attr('stroke-width', 1)
+      .attr('stroke-opacity', 0.6)
       .attr('fill', 'none')
-      .attr('marker-end', d => d.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)')
-      .attr('d', d => drawQuadraticBezier(d.source, d.target));
+      .attr('d', d => `M ${d.source.x},${d.source.y} L ${d.target.x},${d.target.y}`);
 
-    // Edge hover handlers
     linkElements
       .on('mouseover', function(event, d) {
-        d3.select(this).attr('stroke', '#2f81f7').attr('stroke-width', 2.5);
+        d3.select(this).attr('stroke', '#3d444d').attr('stroke-opacity', 1);
         const tip = document.getElementById('tooltip');
         if (tip) {
           tip.style.display = 'block';
@@ -580,17 +495,13 @@ function buildD3Graph() {
           tip.style.top  = (event.clientY - 8) + 'px';
         }
       })
-      .on('mouseout', function(event, d) {
+      .on('mouseout', function() {
         if (selectedNode) return;
-        d3.select(this)
-          .attr('stroke', d.is_high_risk ? '#cf222e' : '#30363d')
-          .attr('stroke-width', d.is_high_risk ? 1.5 : 1)
-          .attr('stroke-opacity', d.is_high_risk ? 0.6 : 0.35);
+        d3.select(this).attr('stroke', '#21262d').attr('stroke-opacity', 0.6);
         const tip = document.getElementById('tooltip');
         if (tip) tip.style.display = 'none';
       });
 
-    // Render Nodes
     const nodeElements = gNodes.selectAll('g.node')
       .data(d3Nodes)
       .enter()
@@ -599,107 +510,64 @@ function buildD3Graph() {
       .attr('data-id', d => d.id)
       .attr('transform', d => `translate(${d.x},${d.y})`);
 
-    // Render Policy Nodes (Rectangles with rounded corners rx=8)
-    nodeElements.filter(d => d.type === 'policy').each(function(d) {
+    nodeElements.each(function(d) {
       const g = d3.select(this);
-      let w = 120, h = 36, fill = '#161b22', stroke = '#30363d', sw = 1, dotColor = '#3fb950';
 
-      if (d.sev === 'CRITICAL') {
-        w = 140; h = 44; fill = '#0d1117'; stroke = '#f85149'; sw = 1.5;
-        dotColor = '#f85149';
-      } else if (d.sev === 'HIGH') {
-        w = 130; h = 40; fill = '#0d1117'; stroke = '#d29922'; sw = 1.5;
-        dotColor = '#d29922';
-      } else if (d.sev === 'MEDIUM') {
-        dotColor = '#e3b341';
+      let r = 9;
+      if (d.type === 'policy') r = 24;
+      else if (d.type === 'action') r = 14;
+
+      let stroke = '#3d444d';
+      let sw = 1;
+
+      if (d.type === 'policy') {
+        if (d.sev === 'CRITICAL') { stroke = '#da3633'; sw = 1.5; }
+        else if (d.sev === 'HIGH') { stroke = '#9a6700'; sw = 1.5; }
       }
-
-      g.append('rect')
-        .attr('width', w)
-        .attr('height', h)
-        .attr('x', -w / 2)
-        .attr('y', -h / 2)
-        .attr('rx', 8)
-        .attr('ry', 8)
-        .attr('fill', fill)
-        .attr('stroke', stroke)
-        .attr('stroke-width', sw);
-
-      // Severity indicator dot (radius 3)
-      g.append('circle')
-        .attr('cx', -w / 2 + 14)
-        .attr('cy', 0)
-        .attr('r', 3)
-        .attr('fill', dotColor);
-
-      // Policy label text
-      g.append('text')
-        .attr('x', 6)
-        .attr('y', 0)
-        .attr('dy', '0.35em')
-        .attr('text-anchor', 'middle')
-        .attr('font-family', 'Inter, sans-serif')
-        .attr('font-size', '11px')
-        .attr('font-weight', '500')
-        .attr('fill', '#c9d1d9')
-        .text(shortLabel(d.id));
-    });
-
-    // Render Action Nodes (Circles)
-    nodeElements.filter(d => d.type === 'action').each(function(d) {
-      const g = d3.select(this);
-      const isHigh = d.is_admin || d.is_privesc || d.is_high_risk;
-      const r = isHigh ? 18 : 14;
-      const fill = '#161b22';
-      const stroke = isHigh ? '#cf222e' : '#30363d';
-      const sw = isHigh ? 1.5 : 1;
 
       g.append('circle')
         .attr('r', r)
-        .attr('fill', fill)
+        .attr('fill', '#0d1117')
         .attr('stroke', stroke)
         .attr('stroke-width', sw);
 
-      g.append('text')
-        .attr('y', r + 12)
-        .attr('text-anchor', 'middle')
-        .attr('font-family', 'JetBrains Mono, monospace')
-        .attr('font-size', '8px')
-        .attr('fill', '#57606a')
-        .text(shortLabel(d.id));
+      if (d.type === 'policy') {
+        const rawLabel = shortLabel(d.id);
+        const truncLabel = rawLabel.length > 14 ? rawLabel.slice(0, 14) + '…' : rawLabel;
+        g.append('text')
+          .attr('y', 36)
+          .attr('text-anchor', 'middle')
+          .attr('font-family', 'Inter, sans-serif')
+          .attr('font-size', '10px')
+          .attr('font-weight', '400')
+          .attr('fill', '#848d97')
+          .text(truncLabel);
+      } else if (d.type === 'action') {
+        const rawLabel = shortLabel(d.id);
+        const truncLabel = rawLabel.length > 10 ? rawLabel.slice(0, 10) + '…' : rawLabel;
+        g.append('text')
+          .attr('y', 24)
+          .attr('text-anchor', 'middle')
+          .attr('font-family', 'Inter, sans-serif')
+          .attr('font-size', '9px')
+          .attr('font-weight', '400')
+          .attr('fill', '#57606a')
+          .text(truncLabel);
+      }
     });
 
-    // Render Resource Nodes (Diamonds - rotated squares)
-    nodeElements.filter(d => d.type === 'resource').each(function(d) {
-      const g = d3.select(this);
-
-      g.append('rect')
-        .attr('width', 20)
-        .attr('height', 20)
-        .attr('x', -10)
-        .attr('y', -10)
-        .attr('transform', 'rotate(45)')
-        .attr('fill', '#161b22')
-        .attr('stroke', '#30363d')
-        .attr('stroke-width', 1);
-
-      g.append('text')
-        .attr('y', 22)
-        .attr('text-anchor', 'middle')
-        .attr('font-family', 'JetBrains Mono, monospace')
-        .attr('font-size', '8px')
-        .attr('fill', '#57606a')
-        .text(shortLabel(d.id));
-    });
-
-    // Node Event Listeners
     nodeElements
       .on('mouseover', function(event, d) {
+        if (!selectedNode) {
+          gLinks.selectAll('.link')
+            .attr('stroke', e => (e.source.id === d.id || e.target.id === d.id) ? '#3d444d' : '#21262d')
+            .attr('stroke-opacity', e => (e.source.id === d.id || e.target.id === d.id) ? 1 : 0.6);
+        }
+
         const tip = document.getElementById('tooltip');
         if (tip) {
           tip.style.display = 'block';
-          const connCount = d3Links.filter(e => e.source.id === d.id || e.target.id === d.id).length;
-          document.getElementById('tt-type').textContent = `${d.type.toUpperCase()} · ${connCount} CONNECTIONS`;
+          document.getElementById('tt-type').textContent = d.type.toUpperCase();
           document.getElementById('tt-label').textContent = d.label || d.id;
         }
       })
@@ -711,6 +579,11 @@ function buildD3Graph() {
         }
       })
       .on('mouseout', function() {
+        if (!selectedNode) {
+          gLinks.selectAll('.link')
+            .attr('stroke', '#21262d')
+            .attr('stroke-opacity', 0.6);
+        }
         const tip = document.getElementById('tooltip');
         if (tip) tip.style.display = 'none';
       })
@@ -723,12 +596,10 @@ function buildD3Graph() {
         zoomToNode(d);
       });
 
-    // Complete setup
     d3ReadyFired = true;
     if (renderTimer) clearTimeout(renderTimer);
     hideSpinner();
 
-    // Initial view auto-fit
     fitGraphViewport();
 
   } catch (err) {
@@ -751,16 +622,26 @@ function selectNode(d) {
     if (e.target.id === d.id) connectedIds.add(e.source.id);
   });
 
-  // Dim non-connected nodes to 0.2 opacity
   d3.selectAll('.node')
     .attr('opacity', n => connectedIds.has(n.id) ? 1 : 0.2);
 
-  // Highlight connected edges
+  d3.selectAll('.node circle')
+    .attr('stroke', n => {
+      if (n.id === d.id) return '#2f81f7';
+      if (connectedIds.has(n.id)) return '#2f81f7';
+      if (n.type === 'policy' && n.sev === 'CRITICAL') return '#da3633';
+      if (n.type === 'policy' && n.sev === 'HIGH') return '#9a6700';
+      return '#3d444d';
+    })
+    .attr('stroke-width', n => {
+      if (n.id === d.id) return 2;
+      if (n.type === 'policy' && (n.sev === 'CRITICAL' || n.sev === 'HIGH')) return 1.5;
+      return 1;
+    });
+
   d3.selectAll('.link')
-    .attr('stroke', e => (e.source.id === d.id || e.target.id === d.id) ? '#2f81f7' : e.is_high_risk ? '#cf222e' : '#30363d')
-    .attr('stroke-width', e => (e.source.id === d.id || e.target.id === d.id) ? 2.5 : e.is_high_risk ? 1.5 : 1)
-    .attr('stroke-opacity', e => (e.source.id === d.id || e.target.id === d.id) ? 1 : 0.2)
-    .attr('marker-end', e => (e.source.id === d.id || e.target.id === d.id) ? 'url(#arrow-highlighted)' : e.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)');
+    .attr('stroke', e => (e.source.id === d.id || e.target.id === d.id) ? '#2f81f7' : '#21262d')
+    .attr('stroke-opacity', e => (e.source.id === d.id || e.target.id === d.id) ? 0.8 : 0.05);
 }
 
 function clearHighlight() {
@@ -770,15 +651,20 @@ function clearHighlight() {
   d3.selectAll('.node')
     .attr('opacity', 1);
 
-  d3.selectAll('.node rect')
-    .attr('stroke', d => d.sev === 'CRITICAL' ? '#f85149' : d.sev === 'HIGH' ? '#d29922' : '#30363d')
-    .attr('stroke-width', d => (d.sev === 'CRITICAL' || d.sev === 'HIGH') ? 1.5 : 1);
+  d3.selectAll('.node circle')
+    .attr('stroke', n => {
+      if (n.type === 'policy' && n.sev === 'CRITICAL') return '#da3633';
+      if (n.type === 'policy' && n.sev === 'HIGH') return '#9a6700';
+      return '#3d444d';
+    })
+    .attr('stroke-width', n => {
+      if (n.type === 'policy' && (n.sev === 'CRITICAL' || n.sev === 'HIGH')) return 1.5;
+      return 1;
+    });
 
   d3.selectAll('.link')
-    .attr('stroke', e => e.is_high_risk ? '#cf222e' : '#30363d')
-    .attr('stroke-width', e => e.is_high_risk ? 1.5 : 1)
-    .attr('stroke-opacity', e => e.is_high_risk ? 0.6 : 0.35)
-    .attr('marker-end', e => e.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)');
+    .attr('stroke', '#21262d')
+    .attr('stroke-opacity', 0.6);
 }
 
 function highlightNodeByFile(policyFile) {

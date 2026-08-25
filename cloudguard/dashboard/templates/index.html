@@ -228,8 +228,19 @@ const NODE_COLORS = {
 /* ── Helpers ───────────────────────────────────────────────── */
 function shortLabel(id) {
   if (!id) return id;
-  const parts = id.split(':');
-  if (parts.length >= 2) return parts.slice(1).join(':').split('/').pop() || id;
+  if (id.startsWith('policy:')) {
+    const clean = id.replace('policy:', '');
+    return clean.split(/[\\/]/).pop();
+  }
+  if (id.startsWith('action:')) {
+    return id.replace('action:', '');
+  }
+  if (id.startsWith('resource:')) {
+    const res = id.replace('resource:', '');
+    if (res === '*') return '*';
+    const parts = res.split(/[:/]/);
+    return parts[parts.length - 1] || res;
+  }
   return id;
 }
 
@@ -241,14 +252,15 @@ function sevClass(sev) {
 function buildHeaderStats() {
   const el = document.getElementById('header-stats');
   const chips = [
-    { cls:'critical', label:`${SUMMARY.critical} CRITICAL`, filter:'CRITICAL' },
-    { cls:'high',     label:`${SUMMARY.high} HIGH`,         filter:'HIGH' },
-    { cls:'medium',   label:`${SUMMARY.medium} MEDIUM`,     filter:'MEDIUM' },
-    { cls:'paths',    label:`${PATHS.length} Paths`,        action:'paths' },
+    { cls:'critical', num: SUMMARY.critical, label:'CRITICAL', filter:'CRITICAL', pulse: SUMMARY.critical > 0 },
+    { cls:'high',     num: SUMMARY.high,     label:'HIGH',     filter:'HIGH' },
+    { cls:'medium',   num: SUMMARY.medium,   label:'MEDIUM',   filter:'MEDIUM' },
+    { cls:'paths',    num: PATHS.length,     label:'Paths',    action:'paths' },
   ];
   el.innerHTML = chips.map(c => `
-    <div class="stat-chip ${c.cls}" data-filter="${c.filter||''}" data-action="${c.action||''}">
-      ${c.label}
+    <div class="stat-chip ${c.cls} ${c.pulse ? 'pulse' : ''}" data-filter="${c.filter||''}" data-action="${c.action||''}">
+      <span class="stat-num">${c.num}</span>
+      <span class="stat-label">${c.label}</span>
     </div>
   `).join('');
 
@@ -281,17 +293,26 @@ function renderFindings() {
     return;
   }
 
+  const SEV_ICON = {
+    CRITICAL: '🔴',
+    HIGH:     '🟠',
+    MEDIUM:   '🟡',
+    LOW:      '🟢',
+    INFO:     '🔵'
+  };
+
   list.innerHTML = filtered.map((f, i) => {
     const file = String(f.policy_file).split(/[\\/]/).pop();
+    const icon = SEV_ICON[f.severity] || '⚪';
     return `
       <div class="finding-card ${sevClass(f.severity)}"
            data-idx="${i}"
-           style="animation-delay:${i*30}ms"
+           style="animation-delay:${i*40}ms"
            title="${escHtml(f.detail)}">
         <div class="finding-header">
-          <span class="sev-badge ${f.severity}">${f.severity}</span>
+          <span class="sev-badge ${f.severity}">${icon} ${f.severity}</span>
           <span class="finding-rule">${f.rule_id}</span>
-          <span class="finding-title">${escHtml(f.title)}</span>
+          <span class="finding-title ${f.severity}">${escHtml(f.title)}</span>
         </div>
         <div class="finding-meta">${escHtml(file)} · Stmt #${f.statement_index}</div>
       </div>
@@ -440,35 +461,37 @@ function buildCytoscape() {
     return '#8b949e';
   }
 
-  function nodeShape(node) {
-    if (node.type === 'policy')   return 'roundrectangle';
-    if (node.type === 'action')   return 'ellipse';
-    if (node.type === 'resource') return 'diamond';
-    return 'ellipse';
-  }
-
   const elements = [
-    ...gd.nodes.map(n => ({
-      data: {
-        id: n.id,
-        label: shortLabel(n.id),
-        fullLabel: n.label,
-        type: n.type,
-        color: nodeColor(n),
-        is_admin: n.is_admin,
-        is_privesc: n.is_privesc,
-      },
-      position: n.position || { x: 400, y: 300 },
-      classes: [n.type, n.is_admin ? 'admin' : '', n.is_privesc ? 'privesc' : ''].filter(Boolean).join(' '),
-    })),
-    ...gd.edges.map((e, i) => ({
-      data: {
-        id: `e${i}`,
-        source: e.source,
-        target: e.target,
-        label: e.action || e.label || '',
-      },
-    })),
+    ...gd.nodes.map(n => {
+      const pSev = policyWorstSev[n.label] || policyWorstSev[n.id.replace('policy:','')] || 'CLEAN';
+      return {
+        data: {
+          id: n.id,
+          label: shortLabel(n.id),
+          fullLabel: n.label,
+          type: n.type,
+          sev: pSev,
+          color: nodeColor(n),
+          is_admin: n.is_admin,
+          is_privesc: n.is_privesc,
+        },
+        position: n.position || { x: 500, y: 400 },
+        classes: [n.type, n.is_admin ? 'admin' : '', n.is_privesc ? 'privesc' : '', `sev-${pSev}`].filter(Boolean).join(' '),
+      };
+    }),
+    ...gd.edges.map((e, i) => {
+      const tgtNode = gd.nodes.find(n => n.id === e.target);
+      const isHighRiskEdge = tgtNode && (tgtNode.is_admin || tgtNode.is_privesc);
+      return {
+        data: {
+          id: `e${i}`,
+          source: e.source,
+          target: e.target,
+          label: e.action || e.label || '',
+        },
+        classes: isHighRiskEdge ? 'high-risk' : '',
+      };
+    }),
   ];
 
   try {
@@ -488,68 +511,112 @@ function buildCytoscape() {
             'text-halign':        'center',
             'text-margin-y':      4,
             'text-wrap':          'ellipsis',
-            'text-max-width':     '120px',
-            'width':              32,
-            'height':             32,
             'border-width':       1.5,
             'border-color':       '#30363d',
+            'transition-property': 'opacity',
+            'transition-duration': '0.2s',
           },
         },
+        /* Policy Nodes */
         {
           selector: 'node[type="policy"]',
           style: {
             shape: 'roundrectangle',
-            width: 40, height: 24,
-            'text-valign': 'center',
-            'font-size': '9px',
+            width: 40,
+            height: 40,
+            'font-size': '11px',
             'font-weight': '600',
+            'text-max-width': '100px',
           },
         },
+        {
+          selector: 'node[type="policy"].sev-CRITICAL',
+          style: {
+            width: 64,
+            height: 64,
+            'border-width': 3,
+            'border-color': '#f85149',
+          },
+        },
+        {
+          selector: 'node[type="policy"].sev-HIGH',
+          style: {
+            width: 52,
+            height: 52,
+            'border-width': 2,
+            'border-color': '#d29922',
+          },
+        },
+        /* Action Nodes */
+        {
+          selector: 'node[type="action"]',
+          style: {
+            shape: 'ellipse',
+            width: 28,
+            height: 28,
+            'font-size': '10px',
+          },
+        },
+        {
+          selector: 'node[type="action"].admin, node[type="action"].privesc',
+          style: {
+            width: 36,
+            height: 36,
+            'background-color': '#f85149',
+          },
+        },
+        /* Resource Nodes */
         {
           selector: 'node[type="resource"]',
-          style: { shape: 'diamond', width: 28, height: 28 },
-        },
-        {
-          selector: 'node.admin',
           style: {
-            'border-color':  '#f85149',
-            'border-width':  3,
-            'shadow-blur':   20,
-            'shadow-color':  'rgba(248,81,73,0.5)',
-            'shadow-offset-x': 0,
-            'shadow-offset-y': 0,
+            shape: 'diamond',
+            width: 22,
+            height: 22,
+            opacity: 0.8,
+            'font-size': '9px',
+            'text-opacity': 0.7,
           },
         },
+        /* Selected & Highlighted State */
         {
-          selector: 'node:selected',
+          selector: 'node.selected, node:selected',
           style: {
             'border-color': '#58a6ff',
             'border-width': 3,
-            'shadow-blur':  20,
-            'shadow-color': 'rgba(88,166,255,0.5)',
-            'shadow-offset-x': 0,
-            'shadow-offset-y': 0,
+            'font-size': '12px',
+            'text-max-width': 'none',
           },
         },
+        /* Edges */
         {
           selector: 'edge',
           style: {
-            'width':               1.5,
-            'line-color':          '#30363d',
-            'target-arrow-color':  '#30363d',
-            'target-arrow-shape':  'vee',
-            'curve-style':         'bezier',
-            'opacity':             0.6,
+            width: 1,
+            'line-color': '#30363d',
+            'target-arrow-color': '#30363d',
+            'target-arrow-shape': 'triangle',
+            'arrow-scale': 0.8,
+            'curve-style': 'bezier',
+            opacity: 0.6,
+          },
+        },
+        {
+          selector: 'edge.high-risk',
+          style: {
+            width: 2,
+            'line-color': '#f85149',
+            'target-arrow-color': '#f85149',
+            opacity: 0.9,
           },
         },
         {
           selector: 'edge.highlighted',
           style: {
-            'line-color':         '#f85149',
-            'target-arrow-color': '#f85149',
-            'width':              3,
-            'opacity':            1,
-            'z-index':            10,
+            width: 2.5,
+            'line-color': '#58a6ff',
+            'target-arrow-color': '#58a6ff',
+            opacity: 1,
+            'z-index': 10,
           },
         },
         {
@@ -561,7 +628,7 @@ function buildCytoscape() {
         },
         {
           selector: 'node.dimmed, edge.dimmed',
-          style: { opacity: 0.1 },
+          style: { opacity: 0.25 },
         },
       ],
       layout: {

@@ -126,13 +126,34 @@ header {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 4px 12px;
   border-radius: 20px;
-  font-size: 12px;
-  font-weight: 600;
   border: 1px solid transparent;
   transition: all 0.2s;
   cursor: pointer;
+}
+
+.stat-chip .stat-num {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.stat-chip .stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.8;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.stat-chip.critical.pulse {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(248, 81, 73, 0); }
 }
 
 .stat-chip:hover { filter: brightness(1.2); transform: translateY(-1px); }
@@ -237,11 +258,21 @@ header {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px 14px;
+  padding: 10px 12px;
   margin-bottom: 6px;
   cursor: pointer;
   transition: all 0.2s;
   border-left: 3px solid transparent;
+}
+
+.finding-card.sev-CRITICAL {
+  padding: 14px 16px;
+  background: rgba(248, 81, 73, 0.05);
+  border-left: 4px solid var(--red);
+}
+
+.finding-card.sev-HIGH {
+  border-left: 3px solid var(--orange);
 }
 
 .finding-card:hover {
@@ -251,8 +282,6 @@ header {
   box-shadow: var(--glow-blue);
 }
 
-.finding-card.sev-CRITICAL { border-left-color: var(--red); }
-.finding-card.sev-HIGH     { border-left-color: var(--orange); }
 .finding-card.sev-MEDIUM   { border-left-color: var(--yellow); }
 .finding-card.sev-LOW      { border-left-color: var(--green); }
 
@@ -270,6 +299,9 @@ header {
   border-radius: 4px;
   letter-spacing: 0.5px;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .sev-badge.CRITICAL { background: var(--red-dim);    color: var(--red);    border: 1px solid var(--red); }
@@ -295,11 +327,16 @@ header {
   text-overflow: ellipsis;
 }
 
+.finding-title.CRITICAL, .finding-title.HIGH {
+  font-weight: 600;
+}
+.finding-title.MEDIUM, .finding-title.LOW, .finding-title.INFO {
+  font-weight: 500;
+}
+
 .finding-meta {
   font-size: 11px;
   color: var(--text-muted);
-  font-family: var(--mono);
-  margin-top: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

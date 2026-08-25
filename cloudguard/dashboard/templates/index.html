@@ -502,6 +502,13 @@ function buildD3Graph() {
 
     simulation.tick(300);
     simulation.stop();
+    simulation.alpha(0);
+    simulation.alphaTarget(0);
+
+    d3Nodes.forEach(d => {
+      d.fx = d.x;
+      d.fy = d.y;
+    });
 
     const linkElements = gLinks.selectAll('path')
       .data(d3Links)

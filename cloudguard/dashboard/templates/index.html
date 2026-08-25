@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CloudGuard — IAM Risk Dashboard</title>
   <link rel="stylesheet" href="/static/style.css" />
-  <!-- Cytoscape.js from CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+  <!-- D3.js v7 from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
   <script>
-    if (typeof cytoscape === 'undefined') {
-      console.error('Cytoscape failed to load from CDN');
+    if (typeof d3 === 'undefined') {
+      console.error('D3.js failed to load from CDN');
       document.addEventListener('DOMContentLoaded', function() {
         var fb = document.getElementById('graph-fallback');
         if (fb) fb.style.display = 'flex';
@@ -146,7 +146,7 @@
       <p>Loading graph visualization…</p>
     </div>
 
-    <div id="cy"></div>
+    <svg id="d3-graph"></svg>
 
     <div id="graph-fallback" style="display:none">
       <div class="icon">⚠️</div>
@@ -195,18 +195,29 @@
 
 <script>
 // ═══════════════════════════════════════════════════════════
-// CloudGuard Dashboard — Main JS
+// CloudGuard Dashboard — D3.js Force Graph Engine
 // ═══════════════════════════════════════════════════════════
 
 (function() {
 'use strict';
 
 /* ── State ─────────────────────────────────────────────────── */
-let cy = null;
+let svg = null;
+let gContainer = null;
+let gLinks = null;
+let gNodes = null;
+let zoomBehavior = null;
+let simulation = null;
+
+let d3Nodes = [];
+let d3Links = [];
 let activeTab    = 'findings';
 let activeSev    = 'ALL';
 let searchQuery  = '';
+let selectedNode = null;
 let highlightedPath = null;
+let renderTimer  = null;
+let d3ReadyFired = false;
 
 /* ── Severity colours ──────────────────────────────────────── */
 const SEV_COLOR = {
@@ -246,6 +257,39 @@ function shortLabel(id) {
 
 function sevClass(sev) {
   return `sev-${sev}`;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* Helper functions for UI state */
+function hideSpinner() {
+  const spinner = document.getElementById('loading-spinner');
+  if (spinner) spinner.style.display = 'none';
+}
+
+function showEmptyState() {
+  hideSpinner();
+  const graphEl = document.getElementById('d3-graph');
+  if (graphEl) graphEl.style.display = 'none';
+  const emptyEl = document.getElementById('empty-graph');
+  if (emptyEl) emptyEl.style.display = 'flex';
+}
+
+function showFallbackState() {
+  hideSpinner();
+  const graphEl = document.getElementById('d3-graph');
+  if (graphEl) graphEl.style.display = 'none';
+  const fallbackEl = document.getElementById('graph-fallback');
+  if (fallbackEl) fallbackEl.style.display = 'flex';
+}
+
+function checkWarningBanner() {
+  if (GRAPH_DATA && GRAPH_DATA.is_trimmed) {
+    const banner = document.getElementById('warning-banner');
+    if (banner) banner.style.display = 'flex';
+  }
 }
 
 /* ── Build header stats ────────────────────────────────────── */
@@ -319,16 +363,12 @@ function renderFindings() {
     `;
   }).join('');
 
-  list.querySelectorAll('.finding-card').forEach((card, i) => {
+  list.querySelectorAll('.finding-card').forEach((card) => {
     card.addEventListener('click', () => {
       const finding = filtered[parseInt(card.dataset.idx)];
       highlightNodeByFile(finding.policy_file);
     });
   });
-}
-
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 /* ── Paths list ────────────────────────────────────────────── */
@@ -380,40 +420,18 @@ function setSevFilter(sev) {
   renderFindings();
 }
 
-/* Helper functions for UI state */
-let renderTimer = null;
-let cyReadyFired = false;
-
-function hideSpinner() {
-  const spinner = document.getElementById('loading-spinner');
-  if (spinner) spinner.style.display = 'none';
+/* ── Draw Bezier Curves ────────────────────────────────────── */
+function drawQuadraticBezier(src, tgt) {
+  const x1 = src.x || 0, y1 = src.y || 0;
+  const x2 = tgt.x || 0, y2 = tgt.y || 0;
+  const dx = x2 - x1, dy = y2 - y1;
+  const cx = (x1 + x2) / 2 - dy * 0.15;
+  const cy = (y1 + y2) / 2 + dx * 0.15;
+  return `M ${x1},${y1} Q ${cx},${cy} ${x2},${y2}`;
 }
 
-function showEmptyState() {
-  hideSpinner();
-  const cyEl = document.getElementById('cy');
-  if (cyEl) cyEl.style.display = 'none';
-  const emptyEl = document.getElementById('empty-graph');
-  if (emptyEl) emptyEl.style.display = 'flex';
-}
-
-function showFallbackState() {
-  hideSpinner();
-  const cyEl = document.getElementById('cy');
-  if (cyEl) cyEl.style.display = 'none';
-  const fallbackEl = document.getElementById('graph-fallback');
-  if (fallbackEl) fallbackEl.style.display = 'flex';
-}
-
-function checkWarningBanner() {
-  if (GRAPH_DATA && GRAPH_DATA.is_trimmed) {
-    const banner = document.getElementById('warning-banner');
-    if (banner) banner.style.display = 'flex';
-  }
-}
-
-/* ── Cytoscape graph ───────────────────────────────────────── */
-function buildCytoscape() {
+/* ── Main D3 Graph Implementation ───────────────────────────── */
+function buildD3Graph() {
   checkWarningBanner();
 
   const gd = GRAPH_DATA;
@@ -422,329 +440,450 @@ function buildCytoscape() {
     return;
   }
 
-  const container = document.getElementById('cy');
-  if (!container) {
+  const canvasDiv = document.getElementById('canvas-area');
+  const svgEl = d3.select('#d3-graph');
+  if (svgEl.empty()) {
     showFallbackState();
     return;
   }
 
   // 15-second render timeout fallback
   renderTimer = setTimeout(() => {
-    if (!cyReadyFired) {
+    if (!d3ReadyFired) {
       showFallbackState();
     }
   }, 15000);
 
-  // Map policy files → worst severity for colouring
-  const policyWorstSev = {};
-  FINDINGS.forEach(f => {
-    const key = String(f.policy_file);
-    const cur = policyWorstSev[key];
-    const ord = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, INFO:1 };
-    if (!cur || ord[f.severity] > ord[cur]) policyWorstSev[key] = f.severity;
-  });
-
-  function nodeColor(node) {
-    if (node.type === 'policy') {
-      const sev = policyWorstSev[node.label] || policyWorstSev[node.id.replace('policy:','')] || 'clean';
-      return SEV_COLOR[sev] || NODE_COLORS.resource;
-    }
-    if (node.type === 'action') {
-      if (node.is_admin)    return NODE_COLORS.admin;
-      if (node.is_privesc)  return NODE_COLORS.privesc;
-      if (node.is_high_risk) return SEV_COLOR.HIGH;
-      return NODE_COLORS.action;
-    }
-    if (node.type === 'resource') {
-      return node.is_admin ? NODE_COLORS.admin : NODE_COLORS.resource;
-    }
-    return '#8b949e';
-  }
-
-  const elements = [
-    ...gd.nodes.map(n => {
-      const pSev = policyWorstSev[n.label] || policyWorstSev[n.id.replace('policy:','')] || 'CLEAN';
-      return {
-        data: {
-          id: n.id,
-          label: shortLabel(n.id),
-          fullLabel: n.label,
-          type: n.type,
-          sev: pSev,
-          color: nodeColor(n),
-          is_admin: n.is_admin,
-          is_privesc: n.is_privesc,
-        },
-        position: n.position || { x: 500, y: 400 },
-        classes: [n.type, n.is_admin ? 'admin' : '', n.is_privesc ? 'privesc' : '', `sev-${pSev}`].filter(Boolean).join(' '),
-      };
-    }),
-    ...gd.edges.map((e, i) => {
-      const tgtNode = gd.nodes.find(n => n.id === e.target);
-      const isHighRiskEdge = tgtNode && (tgtNode.is_admin || tgtNode.is_privesc);
-      return {
-        data: {
-          id: `e${i}`,
-          source: e.source,
-          target: e.target,
-          label: e.action || e.label || '',
-        },
-        classes: isHighRiskEdge ? 'high-risk' : '',
-      };
-    }),
-  ];
-
   try {
-    cy = cytoscape({
-      container: container,
-      elements,
-      style: [
-        {
-          selector: 'node',
-          style: {
-            'background-color':   'data(color)',
-            'label':              'data(label)',
-            'color':              '#e6edf3',
-            'font-size':          '10px',
-            'font-family':        'JetBrains Mono, monospace',
-            'text-valign':        'bottom',
-            'text-halign':        'center',
-            'text-margin-y':      4,
-            'text-wrap':          'ellipsis',
-            'border-width':       1.5,
-            'border-color':       '#30363d',
-            'transition-property': 'opacity',
-            'transition-duration': '0.2s',
-          },
-        },
-        /* Policy Nodes */
-        {
-          selector: 'node[type="policy"]',
-          style: {
-            shape: 'roundrectangle',
-            width: 40,
-            height: 40,
-            'font-size': '11px',
-            'font-weight': '600',
-            'text-max-width': '100px',
-          },
-        },
-        {
-          selector: 'node[type="policy"].sev-CRITICAL',
-          style: {
-            width: 64,
-            height: 64,
-            'border-width': 3,
-            'border-color': '#f85149',
-          },
-        },
-        {
-          selector: 'node[type="policy"].sev-HIGH',
-          style: {
-            width: 52,
-            height: 52,
-            'border-width': 2,
-            'border-color': '#d29922',
-          },
-        },
-        /* Action Nodes */
-        {
-          selector: 'node[type="action"]',
-          style: {
-            shape: 'ellipse',
-            width: 28,
-            height: 28,
-            'font-size': '10px',
-          },
-        },
-        {
-          selector: 'node[type="action"].admin, node[type="action"].privesc',
-          style: {
-            width: 36,
-            height: 36,
-            'background-color': '#f85149',
-          },
-        },
-        /* Resource Nodes */
-        {
-          selector: 'node[type="resource"]',
-          style: {
-            shape: 'diamond',
-            width: 22,
-            height: 22,
-            opacity: 0.8,
-            'font-size': '9px',
-            'text-opacity': 0.7,
-          },
-        },
-        /* Selected & Highlighted State */
-        {
-          selector: 'node.selected, node:selected',
-          style: {
-            'border-color': '#58a6ff',
-            'border-width': 3,
-            'font-size': '12px',
-            'text-max-width': 'none',
-          },
-        },
-        /* Edges */
-        {
-          selector: 'edge',
-          style: {
-            width: 1,
-            'line-color': '#30363d',
-            'target-arrow-color': '#30363d',
-            'target-arrow-shape': 'triangle',
-            'arrow-scale': 0.8,
-            'curve-style': 'bezier',
-            opacity: 0.6,
-          },
-        },
-        {
-          selector: 'edge.high-risk',
-          style: {
-            width: 2,
-            'line-color': '#f85149',
-            'target-arrow-color': '#f85149',
-            opacity: 0.9,
-          },
-        },
-        {
-          selector: 'edge.highlighted',
-          style: {
-            width: 2.5,
-            'line-color': '#58a6ff',
-            'target-arrow-color': '#58a6ff',
-            opacity: 1,
-            'z-index': 10,
-          },
-        },
-        {
-          selector: 'node.path-node',
-          style: {
-            'border-color': '#f85149',
-            'border-width': 3,
-          },
-        },
-        {
-          selector: 'node.dimmed, edge.dimmed',
-          style: { opacity: 0.25 },
-        },
-      ],
-      layout: {
-        name: 'preset',
-        animate: false,
-        fit: true,
-        padding: 60,
-      },
-      wheelSensitivity: 0.3,
-      minZoom: 0.1,
-      maxZoom: 4,
-    });
+    const width = canvasDiv.clientWidth || 900;
+    const height = canvasDiv.clientHeight || 600;
 
-    if (!cy) {
-      showFallbackState();
-      return;
+    svgEl.selectAll('*').remove(); // Clear prior renders
+
+    // Arrow markers definitions
+    const defs = svgEl.append('defs');
+
+    function createMarker(id, color) {
+      defs.append('marker')
+        .attr('id', id)
+        .attr('viewBox', '0 -5 10 10')
+        .attr('refX', 8)
+        .attr('refY', 0)
+        .attr('markerWidth', 6)
+        .attr('markerHeight', 6)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('d', 'M0,-5L10,0L0,5')
+        .attr('fill', color);
     }
 
-    cy.ready(function() {
-      cyReadyFired = true;
-      if (renderTimer) clearTimeout(renderTimer);
-      hideSpinner();
-    });
+    createMarker('arrow-default', '#21262d');
+    createMarker('arrow-high-risk', '#f85149');
+    createMarker('arrow-highlighted', '#58a6ff');
 
-    // Node click → show detail
-    cy.on('tap', 'node', function(evt) {
-      const node = evt.target;
-      showNodeDetail(node);
-      switchTab('node');
-    });
+    // Setup zoom behavior
+    zoomBehavior = d3.zoom()
+      .scaleExtent([0.2, 4])
+      .on('zoom', (event) => {
+        gContainer.attr('transform', event.transform);
+      });
 
-    // Background click → clear highlight
-    cy.on('tap', function(evt) {
-      if (evt.target === cy) {
+    svgEl.call(zoomBehavior);
+
+    // Main graph container group
+    gContainer = svgEl.append('g').attr('id', 'graph-container');
+    gLinks = gContainer.append('g').attr('class', 'links');
+    gNodes = gContainer.append('g').attr('class', 'nodes');
+
+    // Background click to clear highlights
+    svgEl.on('click', function(event) {
+      if (event.target === this || event.target.tagName === 'svg' || event.target.id === 'graph-container') {
         clearHighlight();
       }
     });
 
-    // Hover tooltip
-    cy.on('mouseover', 'node', function(evt) {
-      const node = evt.target;
-      const tip = document.getElementById('tooltip');
-      if (tip) {
-        tip.style.display = 'block';
-        document.getElementById('tt-type').textContent = node.data('type')?.toUpperCase() || '';
-        document.getElementById('tt-label').textContent = node.data('fullLabel') || node.data('label');
-      }
+    // Policy worst severity mapping
+    const policyWorstSev = {};
+    FINDINGS.forEach(f => {
+      const key = String(f.policy_file);
+      const cur = policyWorstSev[key];
+      const ord = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, INFO:1 };
+      if (!cur || ord[f.severity] > ord[cur]) policyWorstSev[key] = f.severity;
     });
 
-    cy.on('mouseout', 'node', function() {
-      const tip = document.getElementById('tooltip');
-      if (tip) tip.style.display = 'none';
+    // Deep clone nodes & links for D3 force simulation
+    d3Nodes = gd.nodes.map(n => {
+      const pSev = policyWorstSev[n.label] || policyWorstSev[n.id.replace('policy:','')] || 'CLEAN';
+      return {
+        id: n.id,
+        label: n.label,
+        type: n.type,
+        sev: pSev,
+        is_admin: n.is_admin,
+        is_privesc: n.is_privesc,
+        is_high_risk: n.is_high_risk,
+      };
     });
 
-    cy.on('mousemove', function(evt) {
-      const tip = document.getElementById('tooltip');
-      if (tip && tip.style.display === 'block') {
-        tip.style.left = (evt.originalEvent.clientX + 12) + 'px';
-        tip.style.top  = (evt.originalEvent.clientY - 8) + 'px';
+    const nodeMap = new Map(d3Nodes.map(n => [n.id, n]));
+
+    d3Links = gd.edges.map(e => {
+      const tgtNode = nodeMap.get(e.target);
+      const isHighRiskEdge = tgtNode && (tgtNode.is_admin || tgtNode.is_privesc);
+      return {
+        source: e.source,
+        target: e.target,
+        action: e.action || e.label || '',
+        is_high_risk: isHighRiskEdge,
+      };
+    }).filter(e => nodeMap.has(e.source) && nodeMap.has(e.target));
+
+    // Staged force simulation
+    simulation = d3.forceSimulation(d3Nodes)
+      .force('link', d3.forceLink(d3Links).id(d => d.id).distance(d => (d.target.type === 'policy' || d.source.type === 'policy') ? 180 : d.target.type === 'action' ? 100 : 60))
+      .force('charge', d3.forceManyBody().strength(-400))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collide', d3.forceCollide().radius(d => d.type === 'policy' ? 90 : d.type === 'action' ? 40 : 30));
+
+    // Synchronously run 300 ticks to settle layout
+    simulation.tick(300);
+    simulation.stop();
+
+    // Render Edges
+    const linkElements = gLinks.selectAll('path')
+      .data(d3Links)
+      .enter()
+      .append('path')
+      .attr('class', d => `link ${d.is_high_risk ? 'high-risk' : ''}`)
+      .attr('stroke', d => d.is_high_risk ? '#f85149' : '#21262d')
+      .attr('stroke-width', d => d.is_high_risk ? 2 : 1.2)
+      .attr('stroke-opacity', d => d.is_high_risk ? 0.8 : 0.5)
+      .attr('fill', 'none')
+      .attr('marker-end', d => d.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)')
+      .attr('d', d => drawQuadraticBezier(d.source, d.target));
+
+    // Edge hover handlers
+    linkElements
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke', '#58a6ff').attr('stroke-width', 2.5);
+        const tip = document.getElementById('tooltip');
+        if (tip) {
+          tip.style.display = 'block';
+          document.getElementById('tt-type').textContent = 'PERMITTED ACTION';
+          document.getElementById('tt-label').textContent = `${shortLabel(d.source.id)} → ${shortLabel(d.target.id)} (${d.action || 'allow'})`;
+        }
+      })
+      .on('mousemove', function(event) {
+        const tip = document.getElementById('tooltip');
+        if (tip && tip.style.display === 'block') {
+          tip.style.left = (event.clientX + 12) + 'px';
+          tip.style.top  = (event.clientY - 8) + 'px';
+        }
+      })
+      .on('mouseout', function(event, d) {
+        if (selectedNode) return;
+        d3.select(this)
+          .attr('stroke', d.is_high_risk ? '#f85149' : '#21262d')
+          .attr('stroke-width', d.is_high_risk ? 2 : 1.2);
+        const tip = document.getElementById('tooltip');
+        if (tip) tip.style.display = 'none';
+      });
+
+    // Render Nodes
+    const nodeElements = gNodes.selectAll('g.node')
+      .data(d3Nodes)
+      .enter()
+      .append('g')
+      .attr('class', 'node')
+      .attr('data-id', d => d.id)
+      .attr('transform', d => `translate(${d.x},${d.y})`);
+
+    // Render Policy Nodes (Rectangles with rounded corners rx=8)
+    nodeElements.filter(d => d.type === 'policy').each(function(d) {
+      const g = d3.select(this);
+      let w = 120, h = 36, fill = '#161b22', stroke = '#30363d', sw = 1.5, dotColor = '#3fb950';
+
+      if (d.sev === 'CRITICAL') {
+        w = 140; h = 44; fill = '#1a0a0a'; stroke = '#f85149'; sw = 2.5;
+        dotColor = '#f85149';
+      } else if (d.sev === 'HIGH') {
+        w = 130; h = 40; fill = '#1a110a'; stroke = '#d29922'; sw = 2;
+        dotColor = '#d29922';
+      } else if (d.sev === 'MEDIUM') {
+        dotColor = '#e3b341';
       }
+
+      const rect = g.append('rect')
+        .attr('width', w)
+        .attr('height', h)
+        .attr('x', -w / 2)
+        .attr('y', -h / 2)
+        .attr('rx', 8)
+        .attr('ry', 8)
+        .attr('fill', fill)
+        .attr('stroke', stroke)
+        .attr('stroke-width', sw);
+
+      if (d.sev === 'CRITICAL') {
+        rect.style('filter', 'drop-shadow(0px 0px 8px rgba(248,81,73,0.5))');
+      } else if (d.sev === 'HIGH') {
+        rect.style('filter', 'drop-shadow(0px 0px 6px rgba(210,153,34,0.4))');
+      }
+
+      // Severity indicator dot
+      g.append('circle')
+        .attr('cx', -w / 2 + 14)
+        .attr('cy', 0)
+        .attr('r', 4)
+        .attr('fill', dotColor);
+
+      // Policy label text
+      g.append('text')
+        .attr('x', 6)
+        .attr('y', 0)
+        .attr('dy', '0.35em')
+        .attr('text-anchor', 'middle')
+        .attr('font-family', 'Inter, sans-serif')
+        .attr('font-size', '11px')
+        .attr('font-weight', '600')
+        .attr('fill', '#e6edf3')
+        .text(shortLabel(d.id));
     });
+
+    // Render Action Nodes (Circles)
+    nodeElements.filter(d => d.type === 'action').each(function(d) {
+      const g = d3.select(this);
+      const isHigh = d.is_admin || d.is_privesc || d.is_high_risk;
+      const r = isHigh ? 18 : 14;
+      const fill = isHigh ? '#2d0f0e' : '#1c2128';
+      const stroke = isHigh ? '#f85149' : '#58a6ff';
+      const sw = isHigh ? 2 : 1.5;
+
+      g.append('circle')
+        .attr('r', r)
+        .attr('fill', fill)
+        .attr('stroke', stroke)
+        .attr('stroke-width', sw);
+
+      g.append('text')
+        .attr('y', r + 12)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', 'JetBrains Mono, monospace')
+        .attr('font-size', '9px')
+        .attr('fill', '#8b949e')
+        .text(shortLabel(d.id));
+    });
+
+    // Render Resource Nodes (Diamonds - rotated squares)
+    nodeElements.filter(d => d.type === 'resource').each(function(d) {
+      const g = d3.select(this);
+
+      g.append('rect')
+        .attr('width', 20)
+        .attr('height', 20)
+        .attr('x', -10)
+        .attr('y', -10)
+        .attr('transform', 'rotate(45)')
+        .attr('fill', '#0f1a0f')
+        .attr('stroke', '#3fb950')
+        .attr('stroke-width', 1.5);
+
+      g.append('text')
+        .attr('y', 22)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', 'JetBrains Mono, monospace')
+        .attr('font-size', '9px')
+        .attr('fill', '#484f58')
+        .text(shortLabel(d.id));
+    });
+
+    // Node Event Listeners
+    nodeElements
+      .on('mouseover', function(event, d) {
+        const tip = document.getElementById('tooltip');
+        if (tip) {
+          tip.style.display = 'block';
+          const connCount = d3Links.filter(e => e.source.id === d.id || e.target.id === d.id).length;
+          document.getElementById('tt-type').textContent = `${d.type.toUpperCase()} · ${connCount} CONNECTIONS`;
+          document.getElementById('tt-label').textContent = d.label || d.id;
+        }
+      })
+      .on('mousemove', function(event) {
+        const tip = document.getElementById('tooltip');
+        if (tip && tip.style.display === 'block') {
+          tip.style.left = (event.clientX + 12) + 'px';
+          tip.style.top  = (event.clientY - 8) + 'px';
+        }
+      })
+      .on('mouseout', function() {
+        const tip = document.getElementById('tooltip');
+        if (tip) tip.style.display = 'none';
+      })
+      .on('click', function(event, d) {
+        event.stopPropagation();
+        selectNode(d);
+      })
+      .on('dblclick', function(event, d) {
+        event.stopPropagation();
+        zoomToNode(d);
+      });
+
+    // Complete setup
+    d3ReadyFired = true;
+    if (renderTimer) clearTimeout(renderTimer);
+    hideSpinner();
+
+    // Initial view auto-fit
+    fitGraphViewport();
+
   } catch (err) {
-    console.error('Cytoscape initialization error:', err);
+    console.error('D3 graph initialization error:', err);
     showFallbackState();
   }
 }
 
-/* ── Path highlighting ─────────────────────────────────────── */
-function highlightPath(pathNodes) {
-  if (!cy) return;
-  clearHighlight();
-  highlightedPath = pathNodes;
+/* ── Node Selection & Highlighting ─────────────────────────── */
+function selectNode(d) {
+  selectedNode = d;
+  showNodeDetail(d);
+  switchTab('node');
 
-  // Dim everything
-  cy.elements().addClass('dimmed');
+  const connectedIds = new Set();
+  connectedIds.add(d.id);
 
-  // Highlight path nodes + edges
-  pathNodes.forEach((nodeId, i) => {
-    const node = cy.getElementById(nodeId);
-    node.removeClass('dimmed').addClass('path-node');
-    if (i < pathNodes.length - 1) {
-      const nextId = pathNodes[i + 1];
-      cy.edges().filter(e => e.source().id() === nodeId && e.target().id() === nextId)
-        .removeClass('dimmed')
-        .addClass('highlighted');
-    }
+  d3Links.forEach(e => {
+    if (e.source.id === d.id) connectedIds.add(e.target.id);
+    if (e.target.id === d.id) connectedIds.add(e.source.id);
   });
+
+  // Dim non-connected nodes to 0.15 opacity
+  d3.selectAll('.node')
+    .attr('opacity', n => connectedIds.has(n.id) ? 1 : 0.15);
+
+  // Highlight connected edges
+  d3.selectAll('.link')
+    .attr('stroke', e => (e.source.id === d.id || e.target.id === d.id) ? '#58a6ff' : e.is_high_risk ? '#f85149' : '#21262d')
+    .attr('stroke-width', e => (e.source.id === d.id || e.target.id === d.id) ? 2.5 : e.is_high_risk ? 2 : 1.2)
+    .attr('stroke-opacity', e => (e.source.id === d.id || e.target.id === d.id) ? 1 : 0.15)
+    .attr('marker-end', e => (e.source.id === d.id || e.target.id === d.id) ? 'url(#arrow-highlighted)' : e.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)');
 }
 
 function clearHighlight() {
-  if (!cy) return;
-  cy.elements().removeClass('dimmed path-node highlighted');
+  selectedNode = null;
   highlightedPath = null;
+
+  d3.selectAll('.node')
+    .attr('opacity', 1)
+    .classed('glowing', false);
+
+  d3.selectAll('.node rect')
+    .attr('stroke', d => d.sev === 'CRITICAL' ? '#f85149' : d.sev === 'HIGH' ? '#d29922' : '#30363d')
+    .attr('stroke-width', d => d.sev === 'CRITICAL' ? 2.5 : d.sev === 'HIGH' ? 2 : 1.5);
+
+  d3.selectAll('.link')
+    .attr('stroke', e => e.is_high_risk ? '#f85149' : '#21262d')
+    .attr('stroke-width', e => e.is_high_risk ? 2 : 1.2)
+    .attr('stroke-opacity', e => e.is_high_risk ? 0.8 : 0.5)
+    .attr('marker-end', e => e.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)');
 }
 
 function highlightNodeByFile(policyFile) {
-  if (!cy) return;
   clearHighlight();
-  const policyId = `policy:${policyFile}`;
-  const node = cy.getElementById(policyId);
-  if (node && node.length) {
-    node.select();
-    cy.animate({ fit: { eles: node, padding: 60 }, duration: 400 });
+  const fileClean = String(policyFile).split(/[\\/]/).pop();
+  const node = d3Nodes.find(n => n.id === `policy:${policyFile}` || n.label.includes(fileClean));
+
+  if (node) {
+    selectNode(node);
+    zoomToNode(node);
+
+    // Flash brief glow animation on target policy node
+    d3.selectAll('.node')
+      .filter(d => d.id === node.id)
+      .classed('glowing', true);
   }
 }
 
-/* ── Node detail panel ─────────────────────────────────────── */
+function highlightPath(pathNodeIds) {
+  clearHighlight();
+  highlightedPath = pathNodeIds;
+
+  const pathSet = new Set(pathNodeIds);
+
+  // Dim non-path nodes
+  d3.selectAll('.node')
+    .attr('opacity', d => pathSet.has(d.id) ? 1 : 0.15);
+
+  // Highlight path edges
+  d3.selectAll('.link')
+    .attr('stroke', e => {
+      const idxSrc = pathNodeIds.indexOf(e.source.id);
+      const idxTgt = pathNodeIds.indexOf(e.target.id);
+      return (idxSrc !== -1 && idxTgt !== -1 && Math.abs(idxSrc - idxTgt) === 1) ? '#58a6ff' : '#21262d';
+    })
+    .attr('stroke-width', e => {
+      const idxSrc = pathNodeIds.indexOf(e.source.id);
+      const idxTgt = pathNodeIds.indexOf(e.target.id);
+      return (idxSrc !== -1 && idxTgt !== -1 && Math.abs(idxSrc - idxTgt) === 1) ? 2.5 : 1.2;
+    })
+    .attr('stroke-opacity', e => {
+      const idxSrc = pathNodeIds.indexOf(e.source.id);
+      const idxTgt = pathNodeIds.indexOf(e.target.id);
+      return (idxSrc !== -1 && idxTgt !== -1 && Math.abs(idxSrc - idxTgt) === 1) ? 1 : 0.15;
+    });
+}
+
+/* ── Zoom & Fit Viewport Helpers ────────────────────────────── */
+function zoomToNode(node) {
+  if (!zoomBehavior || !node) return;
+  const canvasDiv = document.getElementById('canvas-area');
+  const width = canvasDiv.clientWidth || 900;
+  const height = canvasDiv.clientHeight || 600;
+
+  const scale = 1.5;
+  const translate = [width / 2 - scale * node.x, height / 2 - scale * node.y];
+
+  d3.select('#d3-graph')
+    .transition()
+    .duration(750)
+    .call(zoomBehavior.transform, d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
+}
+
+function fitGraphViewport() {
+  if (!d3Nodes.length || !zoomBehavior) return;
+  const canvasDiv = document.getElementById('canvas-area');
+  const width = canvasDiv.clientWidth || 900;
+  const height = canvasDiv.clientHeight || 600;
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  d3Nodes.forEach(n => {
+    if (n.x < minX) minX = n.x;
+    if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y;
+    if (n.y > maxY) maxY = n.y;
+  });
+
+  const dx = maxX - minX || 1;
+  const dy = maxY - minY || 1;
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+
+  const scale = Math.min(3, Math.max(0.3, 0.85 / Math.max(dx / width, dy / height)));
+  const translate = [width / 2 - scale * cx, height / 2 - scale * cy];
+
+  d3.select('#d3-graph')
+    .transition()
+    .duration(600)
+    .call(zoomBehavior.transform, d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
+}
+
+/* ── Node Detail Panel ─────────────────────────────────────── */
 function showNodeDetail(node) {
   const panel = document.getElementById('node-detail');
-  const id    = node.id();
-  const type  = node.data('type');
-  const label = node.data('fullLabel') || node.data('label');
+  const id    = node.id;
+  const type  = node.type;
+  const label = node.label || node.id;
 
-  // Find related paths
   const relatedPaths = PATHS.filter(p => p.path.some(n => n === id));
-  // Find related findings
   const relatedFindings = FINDINGS.filter(f =>
     String(f.policy_file).includes(label) || id.includes(String(f.policy_file))
   );
@@ -785,16 +924,16 @@ function showNodeDetail(node) {
 /* ── Controls ──────────────────────────────────────────────── */
 function bindControls() {
   document.getElementById('btn-fit').addEventListener('click', () => {
-    if (cy) cy.fit(cy.elements(), 40);
+    fitGraphViewport();
   });
   document.getElementById('btn-zoom-in').addEventListener('click', () => {
-    if (cy) cy.zoom(cy.zoom() * 1.3);
+    d3.select('#d3-graph').transition().duration(300).call(zoomBehavior.scaleBy, 1.3);
   });
   document.getElementById('btn-zoom-out').addEventListener('click', () => {
-    if (cy) cy.zoom(cy.zoom() / 1.3);
+    d3.select('#d3-graph').transition().duration(300).call(zoomBehavior.scaleBy, 1 / 1.3);
   });
   document.getElementById('btn-layout').addEventListener('click', () => {
-    if (cy) cy.layout({ name:'preset', animate:false, fit:true, padding:60 }).run();
+    buildD3Graph();
   });
 }
 
@@ -807,21 +946,22 @@ function bindSearch() {
       searchQuery = this.value.trim();
       renderFindings();
 
-      // Also highlight matching nodes in graph
-      if (cy && searchQuery) {
-        cy.elements().removeClass('dimmed');
+      if (searchQuery) {
         const q = searchQuery.toLowerCase();
-        const matching = cy.nodes().filter(n =>
-          n.data('fullLabel')?.toLowerCase().includes(q) ||
-          n.id().toLowerCase().includes(q)
+        const matchingIds = new Set(
+          d3Nodes
+            .filter(n => n.label?.toLowerCase().includes(q) || n.id.toLowerCase().includes(q))
+            .map(n => n.id)
         );
-        if (matching.length) {
-          cy.elements().addClass('dimmed');
-          matching.removeClass('dimmed');
-          matching.connectedEdges().removeClass('dimmed');
-          matching.neighborhood().removeClass('dimmed');
+
+        if (matchingIds.size > 0) {
+          d3.selectAll('.node')
+            .attr('opacity', d => matchingIds.has(d.id) ? 1 : 0.1);
+
+          d3.selectAll('.link')
+            .attr('stroke-opacity', e => (matchingIds.has(e.source.id) || matchingIds.has(e.target.id)) ? 0.8 : 0.1);
         }
-      } else if (cy) {
+      } else {
         clearHighlight();
       }
     }, 200);
@@ -848,7 +988,7 @@ function init() {
   buildHeaderStats();
   renderFindings();
   renderPaths();
-  buildCytoscape();
+  buildD3Graph();
   bindControls();
   bindSearch();
   bindFilters();

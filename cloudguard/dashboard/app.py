@@ -165,65 +165,6 @@ def create_app(
         edges = edges[:80]
         is_trimmed = True
 
-    # Pre-compute hierarchical radial x/y positions for preset Cytoscape layout
-    import math
-    cx, cy = 500.0, 400.0
-    placed_node_ids = set()
-
-    policy_nodes = [n for n in nodes if n.get("type") == "policy"]
-    n_policies = len(policy_nodes)
-
-    # 1. Policy nodes: center cluster of radius 200 around (500, 400)
-    for i, pnode in enumerate(policy_nodes):
-        p_angle = (2.0 * math.pi * i) / n_policies if n_policies > 0 else 0.0
-        px = round(cx + 200.0 * math.cos(p_angle), 2)
-        py = round(cy + 200.0 * math.sin(p_angle), 2)
-        pnode["position"] = {"x": px, "y": py}
-        placed_node_ids.add(pnode["id"])
-
-        # 2. Action nodes: mid-ring around parent policy (radius 120)
-        p_actions = [
-            n for n in nodes
-            if n.get("type") == "action" and any(
-                e["source"] == pnode["id"] and e["target"] == n["id"] for e in edges
-            )
-        ]
-        n_actions = len(p_actions)
-        for j, anode in enumerate(p_actions):
-            if anode["id"] in placed_node_ids:
-                continue
-            a_angle = p_angle + ((2.0 * math.pi * j) / n_actions if n_actions > 0 else 0.0)
-            ax = round(px + 120.0 * math.cos(a_angle), 2)
-            ay = round(py + 120.0 * math.sin(a_angle), 2)
-            anode["position"] = {"x": ax, "y": ay}
-            placed_node_ids.add(anode["id"])
-
-            # 3. Resource nodes: connected to action nodes (radius 60)
-            a_resources = [
-                n for n in nodes
-                if n.get("type") == "resource" and any(
-                    e["source"] == anode["id"] and e["target"] == n["id"] for e in edges
-                )
-            ]
-            n_resources = len(a_resources)
-            for k, rnode in enumerate(a_resources):
-                if rnode["id"] in placed_node_ids:
-                    continue
-                r_angle = a_angle + ((2.0 * math.pi * k) / n_resources if n_resources > 0 else 0.0) - (math.pi / 4.0)
-                rx = round(ax + 60.0 * math.cos(r_angle), 2)
-                ry = round(ay + 60.0 * math.sin(r_angle), 2)
-                rnode["position"] = {"x": rx, "y": ry}
-                placed_node_ids.add(rnode["id"])
-
-    # Fallback placement for orphan nodes
-    unplaced = [n for n in nodes if n["id"] not in placed_node_ids]
-    n_unplaced = len(unplaced)
-    for u_idx, unode in enumerate(unplaced):
-        u_angle = (2.0 * math.pi * u_idx) / n_unplaced if n_unplaced > 0 else 0.0
-        ux = round(cx + 350.0 * math.cos(u_angle), 2)
-        uy = round(cy + 350.0 * math.sin(u_angle), 2)
-        unode["position"] = {"x": ux, "y": uy}
-
     graph_data["nodes"] = nodes
     graph_data["edges"] = edges
     graph_data["is_trimmed"] = is_trimmed

@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CloudGuard — IAM Risk Dashboard</title>
+  <meta name="description" content="CloudGuard AWS IAM Risk Analyzer — Interactive graph visualization of IAM permission attack paths and misconfigurations." />
+  <link rel="stylesheet" href="/static/style.css" />
+  <!-- Cytoscape.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+</head>
+
+<body>
+<div id="app">
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header>
+    <a class="logo" href="/">
+      <div class="logo-icon">🛡</div>
+      <span class="logo-text">Cloud<span>Guard</span></span>
+    </a>
+    <div class="header-divider"></div>
+
+    <div class="header-stats" id="header-stats">
+      <!-- Populated by JS -->
+    </div>
+
+    <div class="header-spacer"></div>
+
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="search-input" placeholder="Search actions, ARNs, policies…" autocomplete="off" />
+    </div>
+  </header>
+
+  <!-- ── Sidebar ─────────────────────────────────────────────── -->
+  <aside id="sidebar">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="findings">Findings</button>
+      <button class="tab-btn" data-tab="paths">Attack Paths</button>
+      <button class="tab-btn" data-tab="node">Node Detail</button>
+    </div>
+
+    <!-- Findings tab -->
+    <div class="tab-content active" id="tab-findings">
+      <div class="filter-bar" id="sev-filters">
+        <button class="filter-chip active ALL" data-sev="ALL">All</button>
+        <button class="filter-chip CRITICAL"  data-sev="CRITICAL">CRITICAL</button>
+        <button class="filter-chip HIGH"      data-sev="HIGH">HIGH</button>
+        <button class="filter-chip MEDIUM"    data-sev="MEDIUM">MEDIUM</button>
+        <button class="filter-chip"           data-sev="LOW">LOW</button>
+      </div>
+      <div id="findings-list"></div>
+    </div>
+
+    <!-- Attack Paths tab -->
+    <div class="tab-content" id="tab-paths">
+      <div id="paths-list"></div>
+    </div>
+
+    <!-- Node Detail tab -->
+    <div class="tab-content" id="tab-node">
+      <div id="node-detail">
+        <div class="detail-empty">
+          <div class="icon">🎯</div>
+          <p>Click any node in the graph to inspect it</p>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Graph Canvas ────────────────────────────────────────── -->
+  <main id="canvas-area">
+    <div id="cy"></div>
+    <div id="empty-graph" style="display:none">
+      <div class="icon">🕸</div>
+      <p>No graph data.  Run with <code>--graph</code> or <code>--live</code>.</p>
+    </div>
+
+    <!-- Controls -->
+    <div id="graph-controls">
+      <button class="ctrl-btn" id="btn-fit"    title="Fit graph">⊞</button>
+      <button class="ctrl-btn" id="btn-zoom-in" title="Zoom in">+</button>
+      <button class="ctrl-btn" id="btn-zoom-out" title="Zoom out">−</button>
+      <button class="ctrl-btn" id="btn-layout"  title="Re-layout">⟳</button>
+    </div>
+
+    <!-- Legend -->
+    <div id="legend">
+      <h4>Node Types</h4>
+      <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div> Policy (CRITICAL)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#d29922"></div> Policy (HIGH)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#e3b341"></div> Policy (MEDIUM)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div> Policy (Clean)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div> Action</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#bc8cff; border-radius:2px"></div> Resource</div>
+    </div>
+  </main>
+</div>
+
+<!-- Tooltip -->
+<div id="tooltip">
+  <div class="tt-type" id="tt-type"></div>
+  <div class="tt-label" id="tt-label"></div>
+</div>
+
+<!-- ── Data injected by Flask ──────────────────────────────── -->
+<script>
+  const GRAPH_DATA  = {{ graph_data_json|safe }};
+  const FINDINGS    = {{ findings_json|safe }};
+  const PATHS       = {{ paths_json|safe }};
+  const SUMMARY     = {{ summary|tojson }};
+</script>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// CloudGuard Dashboard — Main JS
+// ═══════════════════════════════════════════════════════════
+
+(function() {
+'use strict';
+
+/* ── State ─────────────────────────────────────────────────── */
+let cy = null;
+let activeTab    = 'findings';
+let activeSev    = 'ALL';
+let searchQuery  = '';
+let highlightedPath = null;
+
+/* ── Severity colours ──────────────────────────────────────── */
+const SEV_COLOR = {
+  CRITICAL: '#f85149',
+  HIGH:     '#d29922',
+  MEDIUM:   '#e3b341',
+  LOW:      '#3fb950',
+  INFO:     '#8b949e',
+};
+
+const NODE_COLORS = {
+  policy:    '#58a6ff',
+  action:    '#bc8cff',
+  resource:  '#3fb950',
+  admin:     '#f85149',
+  privesc:   '#d29922',
+};
+
+/* ── Helpers ───────────────────────────────────────────────── */
+function shortLabel(id) {
+  if (!id) return id;
+  const parts = id.split(':');
+  if (parts.length >= 2) return parts.slice(1).join(':').split('/').pop() || id;
+  return id;
+}
+
+function sevClass(sev) {
+  return `sev-${sev}`;
+}
+
+/* ── Build header stats ────────────────────────────────────── */
+function buildHeaderStats() {
+  const el = document.getElementById('header-stats');
+  const chips = [
+    { cls:'critical', label:`${SUMMARY.critical} CRITICAL`, filter:'CRITICAL' },
+    { cls:'high',     label:`${SUMMARY.high} HIGH`,         filter:'HIGH' },
+    { cls:'medium',   label:`${SUMMARY.medium} MEDIUM`,     filter:'MEDIUM' },
+    { cls:'paths',    label:`${PATHS.length} Paths`,        action:'paths' },
+  ];
+  el.innerHTML = chips.map(c => `
+    <div class="stat-chip ${c.cls}" data-filter="${c.filter||''}" data-action="${c.action||''}">
+      ${c.label}
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.stat-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const a = chip.dataset.action;
+      const f = chip.dataset.filter;
+      if (a === 'paths') { switchTab('paths'); return; }
+      if (f) { switchTab('findings'); setSevFilter(f); }
+    });
+  });
+}
+
+/* ── Findings list ─────────────────────────────────────────── */
+function renderFindings() {
+  const list = document.getElementById('findings-list');
+  let filtered = FINDINGS.filter(f => {
+    const matchSev = activeSev === 'ALL' || f.severity === activeSev;
+    const q = searchQuery.toLowerCase();
+    const matchQ = !q
+      || f.title.toLowerCase().includes(q)
+      || f.detail.toLowerCase().includes(q)
+      || String(f.policy_file).toLowerCase().includes(q)
+      || f.rule_id.toLowerCase().includes(q);
+    return matchSev && matchQ;
+  });
+
+  if (!filtered.length) {
+    list.innerHTML = `<div class="detail-empty" style="height:140px"><div class="icon">✓</div><p>No findings match.</p></div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map((f, i) => {
+    const file = String(f.policy_file).split(/[\\/]/).pop();
+    return `
+      <div class="finding-card ${sevClass(f.severity)}"
+           data-idx="${i}"
+           style="animation-delay:${i*30}ms"
+           title="${escHtml(f.detail)}">
+        <div class="finding-header">
+          <span class="sev-badge ${f.severity}">${f.severity}</span>
+          <span class="finding-rule">${f.rule_id}</span>
+          <span class="finding-title">${escHtml(f.title)}</span>
+        </div>
+        <div class="finding-meta">${escHtml(file)} · Stmt #${f.statement_index}</div>
+      </div>
+    `;
+  }).join('');
+
+  list.querySelectorAll('.finding-card').forEach((card, i) => {
+    card.addEventListener('click', () => {
+      const finding = filtered[parseInt(card.dataset.idx)];
+      highlightNodeByFile(finding.policy_file);
+    });
+  });
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ── Paths list ────────────────────────────────────────────── */
+function renderPaths() {
+  const list = document.getElementById('paths-list');
+  if (!PATHS.length) {
+    list.innerHTML = `<div class="detail-empty" style="height:140px"><div class="icon">🔒</div><p>No attack paths detected.</p></div>`;
+    return;
+  }
+  list.innerHTML = PATHS.map((p, i) => {
+    const parts = p.readable.split(' → ');
+    const readableHtml = parts.map((part, j) => {
+      const isLast = j === parts.length - 1;
+      return `<span style="color:${isLast ? '#f85149' : '#e6edf3'}">${escHtml(part)}</span>${!isLast ? ' <span class="path-arrow">→</span> ' : ''}`;
+    }).join('');
+    return `
+      <div class="path-card" data-idx="${i}" style="animation-delay:${i*40}ms">
+        <div class="path-hops">⚡ ${p.hops} hop${p.hops !== 1 ? 's' : ''}</div>
+        <div class="path-readable">${readableHtml}</div>
+      </div>
+    `;
+  }).join('');
+
+  list.querySelectorAll('.path-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const path = PATHS[parseInt(card.dataset.idx)];
+      highlightPath(path.path);
+    });
+  });
+}
+
+/* ── Tab switching ─────────────────────────────────────────── */
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => {
+    c.classList.toggle('active', c.id === `tab-${tab}`);
+  });
+}
+
+/* ── Severity filter ───────────────────────────────────────── */
+function setSevFilter(sev) {
+  activeSev = sev;
+  document.querySelectorAll('.filter-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.sev === sev);
+  });
+  renderFindings();
+}
+
+/* ── Cytoscape graph ───────────────────────────────────────── */
+function buildCytoscape() {
+  const gd = GRAPH_DATA;
+  if (!gd || (!gd.nodes?.length && !gd.edges?.length)) {
+    document.getElementById('empty-graph').style.display = 'flex';
+    return;
+  }
+
+  // Map policy files → worst severity for colouring
+  const policyWorstSev = {};
+  FINDINGS.forEach(f => {
+    const key = String(f.policy_file);
+    const cur = policyWorstSev[key];
+    const ord = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, INFO:1 };
+    if (!cur || ord[f.severity] > ord[cur]) policyWorstSev[key] = f.severity;
+  });
+
+  function nodeColor(node) {
+    if (node.type === 'policy') {
+      const sev = policyWorstSev[node.label] || policyWorstSev[node.id.replace('policy:','')] || 'clean';
+      return SEV_COLOR[sev] || NODE_COLORS.resource;
+    }
+    if (node.type === 'action') {
+      if (node.is_admin)    return NODE_COLORS.admin;
+      if (node.is_privesc)  return NODE_COLORS.privesc;
+      if (node.is_high_risk) return SEV_COLOR.HIGH;
+      return NODE_COLORS.action;
+    }
+    if (node.type === 'resource') {
+      return node.is_admin ? NODE_COLORS.admin : NODE_COLORS.resource;
+    }
+    return '#8b949e';
+  }
+
+  function nodeShape(node) {
+    if (node.type === 'policy')   return 'roundrectangle';
+    if (node.type === 'action')   return 'ellipse';
+    if (node.type === 'resource') return 'diamond';
+    return 'ellipse';
+  }
+
+  const elements = [
+    ...gd.nodes.map(n => ({
+      data: {
+        id: n.id,
+        label: shortLabel(n.id),
+        fullLabel: n.label,
+        type: n.type,
+        color: nodeColor(n),
+        is_admin: n.is_admin,
+        is_privesc: n.is_privesc,
+      },
+      classes: [n.type, n.is_admin ? 'admin' : '', n.is_privesc ? 'privesc' : ''].filter(Boolean).join(' '),
+    })),
+    ...gd.edges.map((e, i) => ({
+      data: {
+        id: `e${i}`,
+        source: e.source,
+        target: e.target,
+        label: e.action || e.label || '',
+      },
+    })),
+  ];
+
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements,
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'background-color':   'data(color)',
+          'label':              'data(label)',
+          'color':              '#e6edf3',
+          'font-size':          '10px',
+          'font-family':        'JetBrains Mono, monospace',
+          'text-valign':        'bottom',
+          'text-halign':        'center',
+          'text-margin-y':      4,
+          'text-wrap':          'ellipsis',
+          'text-max-width':     '120px',
+          'width':              32,
+          'height':             32,
+          'border-width':       1.5,
+          'border-color':       '#30363d',
+          'transition-property': 'background-color, border-color, width, height',
+          'transition-duration':  '0.2s',
+        },
+      },
+      {
+        selector: 'node[type="policy"]',
+        style: {
+          shape: 'roundrectangle',
+          width: 40, height: 24,
+          'text-valign': 'center',
+          'font-size': '9px',
+          'font-weight': '600',
+        },
+      },
+      {
+        selector: 'node[type="resource"]',
+        style: { shape: 'diamond', width: 28, height: 28 },
+      },
+      {
+        selector: 'node.admin',
+        style: {
+          'border-color':  '#f85149',
+          'border-width':  3,
+          'shadow-blur':   20,
+          'shadow-color':  'rgba(248,81,73,0.5)',
+          'shadow-offset-x': 0,
+          'shadow-offset-y': 0,
+        },
+      },
+      {
+        selector: 'node:selected',
+        style: {
+          'border-color': '#58a6ff',
+          'border-width': 3,
+          'shadow-blur':  20,
+          'shadow-color': 'rgba(88,166,255,0.5)',
+          'shadow-offset-x': 0,
+          'shadow-offset-y': 0,
+        },
+      },
+      {
+        selector: 'edge',
+        style: {
+          'width':               1.5,
+          'line-color':          '#30363d',
+          'target-arrow-color':  '#30363d',
+          'target-arrow-shape':  'vee',
+          'curve-style':         'bezier',
+          'opacity':             0.6,
+          'transition-property': 'line-color, opacity, width',
+          'transition-duration':  '0.2s',
+        },
+      },
+      {
+        selector: 'edge.highlighted',
+        style: {
+          'line-color':         '#f85149',
+          'target-arrow-color': '#f85149',
+          'width':              3,
+          'opacity':            1,
+          'z-index':            10,
+        },
+      },
+      {
+        selector: 'node.path-node',
+        style: {
+          'border-color': '#f85149',
+          'border-width': 3,
+        },
+      },
+      {
+        selector: 'node.dimmed, edge.dimmed',
+        style: { opacity: 0.1 },
+      },
+    ],
+    layout: {
+      name: 'cose',
+      animate: false,
+      padding: 60,
+      nodeRepulsion: 8000,
+      idealEdgeLength: 100,
+      gravity: 0.25,
+      numIter: 1000,
+    },
+    wheelSensitivity: 0.3,
+    minZoom: 0.1,
+    maxZoom: 4,
+  });
+
+  // Node click → show detail
+  cy.on('tap', 'node', function(evt) {
+    const node = evt.target;
+    showNodeDetail(node);
+    switchTab('node');
+  });
+
+  // Background click → clear highlight
+  cy.on('tap', function(evt) {
+    if (evt.target === cy) {
+      clearHighlight();
+    }
+  });
+
+  // Hover tooltip
+  cy.on('mouseover', 'node', function(evt) {
+    const node = evt.target;
+    const tip = document.getElementById('tooltip');
+    tip.style.display = 'block';
+    document.getElementById('tt-type').textContent = node.data('type')?.toUpperCase() || '';
+    document.getElementById('tt-label').textContent = node.data('fullLabel') || node.data('label');
+  });
+
+  cy.on('mouseout', 'node', function() {
+    document.getElementById('tooltip').style.display = 'none';
+  });
+
+  cy.on('mousemove', function(evt) {
+    const tip = document.getElementById('tooltip');
+    if (tip.style.display === 'block') {
+      tip.style.left = (evt.originalEvent.clientX + 12) + 'px';
+      tip.style.top  = (evt.originalEvent.clientY - 8) + 'px';
+    }
+  });
+}
+
+/* ── Path highlighting ─────────────────────────────────────── */
+function highlightPath(pathNodes) {
+  if (!cy) return;
+  clearHighlight();
+  highlightedPath = pathNodes;
+
+  // Dim everything
+  cy.elements().addClass('dimmed');
+
+  // Highlight path nodes + edges
+  pathNodes.forEach((nodeId, i) => {
+    const node = cy.getElementById(nodeId);
+    node.removeClass('dimmed').addClass('path-node');
+    if (i < pathNodes.length - 1) {
+      const nextId = pathNodes[i + 1];
+      cy.edges().filter(e => e.source().id() === nodeId && e.target().id() === nextId)
+        .removeClass('dimmed')
+        .addClass('highlighted');
+    }
+  });
+}
+
+function clearHighlight() {
+  if (!cy) return;
+  cy.elements().removeClass('dimmed path-node highlighted');
+  highlightedPath = null;
+}
+
+function highlightNodeByFile(policyFile) {
+  if (!cy) return;
+  clearHighlight();
+  const policyId = `policy:${policyFile}`;
+  const node = cy.getElementById(policyId);
+  if (node && node.length) {
+    node.select();
+    cy.animate({ fit: { eles: node, padding: 60 }, duration: 400 });
+  }
+}
+
+/* ── Node detail panel ─────────────────────────────────────── */
+function showNodeDetail(node) {
+  const panel = document.getElementById('node-detail');
+  const id    = node.id();
+  const type  = node.data('type');
+  const label = node.data('fullLabel') || node.data('label');
+
+  // Find related paths
+  const relatedPaths = PATHS.filter(p => p.path.some(n => n === id));
+  // Find related findings
+  const relatedFindings = FINDINGS.filter(f =>
+    String(f.policy_file).includes(label) || id.includes(String(f.policy_file))
+  );
+
+  const pathsHtml = relatedPaths.length
+    ? relatedPaths.map(p => `
+        <div class="path-card" style="cursor:default; margin-bottom:8px">
+          <div class="path-hops">⚡ ${p.hops} hop${p.hops!==1?'s':''}</div>
+          <div class="path-readable">${escHtml(p.readable)}</div>
+        </div>
+      `).join('')
+    : '<p style="color:var(--text-muted);font-size:12px">No attack paths through this node</p>';
+
+  const findingsHtml = relatedFindings.length
+    ? relatedFindings.map(f => `
+        <div class="finding-card ${sevClass(f.severity)}" style="cursor:default;margin-bottom:6px">
+          <div class="finding-header">
+            <span class="sev-badge ${f.severity}">${f.severity}</span>
+            <span class="finding-rule">${f.rule_id}</span>
+            <span class="finding-title">${escHtml(f.title)}</span>
+          </div>
+        </div>
+      `).join('')
+    : '<p style="color:var(--text-muted);font-size:12px">No findings linked to this node</p>';
+
+  panel.innerHTML = `
+    <h3>${type === 'policy' ? '📄' : type === 'action' ? '⚡' : '🗂'} ${escHtml(label)}</h3>
+    <div class="node-id">${escHtml(id)}</div>
+
+    <h3 style="margin-bottom:8px">Attack Paths (${relatedPaths.length})</h3>
+    ${pathsHtml}
+
+    <h3 style="margin-top:16px;margin-bottom:8px">Findings (${relatedFindings.length})</h3>
+    ${findingsHtml}
+  `;
+}
+
+/* ── Controls ──────────────────────────────────────────────── */
+function bindControls() {
+  document.getElementById('btn-fit').addEventListener('click', () => {
+    if (cy) cy.fit(cy.elements(), 40);
+  });
+  document.getElementById('btn-zoom-in').addEventListener('click', () => {
+    if (cy) cy.zoom(cy.zoom() * 1.3);
+  });
+  document.getElementById('btn-zoom-out').addEventListener('click', () => {
+    if (cy) cy.zoom(cy.zoom() / 1.3);
+  });
+  document.getElementById('btn-layout').addEventListener('click', () => {
+    if (cy) cy.layout({ name:'cose', animate:false, padding:60, nodeRepulsion:8000, idealEdgeLength:100 }).run();
+  });
+}
+
+/* ── Search ────────────────────────────────────────────────── */
+function bindSearch() {
+  let debounce;
+  document.getElementById('search-input').addEventListener('input', function() {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      searchQuery = this.value.trim();
+      renderFindings();
+
+      // Also highlight matching nodes in graph
+      if (cy && searchQuery) {
+        cy.elements().removeClass('dimmed');
+        const q = searchQuery.toLowerCase();
+        const matching = cy.nodes().filter(n =>
+          n.data('fullLabel')?.toLowerCase().includes(q) ||
+          n.id().toLowerCase().includes(q)
+        );
+        if (matching.length) {
+          cy.elements().addClass('dimmed');
+          matching.removeClass('dimmed');
+          matching.connectedEdges().removeClass('dimmed');
+          matching.neighborhood().removeClass('dimmed');
+        }
+      } else if (cy) {
+        clearHighlight();
+      }
+    }, 200);
+  });
+}
+
+/* ── Severity filter chips ─────────────────────────────────── */
+function bindFilters() {
+  document.getElementById('sev-filters').addEventListener('click', function(e) {
+    const chip = e.target.closest('.filter-chip');
+    if (chip) setSevFilter(chip.dataset.sev);
+  });
+}
+
+/* ── Tabs ──────────────────────────────────────────────────── */
+function bindTabs() {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+}
+
+/* ── Init ──────────────────────────────────────────────────── */
+function init() {
+  buildHeaderStats();
+  renderFindings();
+  renderPaths();
+  buildCytoscape();
+  bindControls();
+  bindSearch();
+  bindFilters();
+  bindTabs();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+
+})();
+</script>
+</body>
+</html>

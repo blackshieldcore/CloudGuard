@@ -1,0 +1,15 @@
+# CloudGuard — AWS IAM Risk Analyzer
+# Core (required)
+networkx>=3.0
+
+# Layer 2: Live AWS scanner
+boto3>=1.34
+
+# Layer 3: Exploit + remediation generator
+jinja2>=3.1
+
+# Layer 4: Visual dashboard
+flask>=3.0
+
+# Optional: static graph export to PNG/SVG
+matplotlib>=3.8

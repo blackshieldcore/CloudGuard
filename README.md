@@ -1,10 +1,29 @@
-# CloudGuard - AWS IAM Risk Analyzer
+# CloudGuard — AWS IAM Risk Analyzer
 
-A lightweight, dependency-free Python tool that scans AWS IAM policy documents for misconfigurations, privilege-escalation paths, and overly permissive access patterns.
+A multi-layer AWS IAM security tool that scans policy documents, builds attack path graphs, pulls live AWS inventory, generates Terraform remediations, and visualizes everything in an interactive dashboard.
 
-## Why this exists
+## Architecture
 
-IAM over-permissioning is the #1 cloud security risk. Tools like AWS Access Analyzer exist but are account-bound they can't scan a policy *before* it's deployed, and they don't flag privilege-escalation chains. CloudGuard fills that gap: it reads raw IAM policy JSON files and flags risks *offline*, making it useful in code review, CI pipelines, and pre-deployment checks.
+```
+cloudguard/
+├── core.py          ← CloudGuard class (policy loading, analysis)
+├── rules.py         ← 7 detection rules (CG-001 → CG-007), extensible
+├── graph.py         ← NetworkX attack path engine (BFS multi-hop)
+├── live.py          ← Live AWS IAM scanner (boto3)
+├── exploits.py      ← Defensive PoC script generator (Jinja2)
+├── remediate.py     ← Terraform fix generator (Jinja2)
+├── monitor.py       ← CloudTrail anomaly + honeypot deployer
+└── dashboard/
+    ├── app.py       ← Flask API server
+    ├── templates/
+    │   └── index.html   ← Cytoscape.js interactive graph (dark theme)
+    └── static/
+        └── style.css    ← Premium dark dashboard CSS
+cli.py               ← Unified CLI entry point (all flags)
+cloudguard.py        ← Backward-compat shim (original invocation still works)
+requirements.txt
+Dockerfile
+```
 
 ## What it detects
 
@@ -13,95 +32,222 @@ IAM over-permissioning is the #1 cloud security risk. Tools like AWS Access Anal
 | CG-001 | CRITICAL | Full admin access (`Action: *`, `Resource: *`) |
 | CG-002 | HIGH/MED | Wildcard service actions (e.g., `s3:*`, `iam:*`) |
 | CG-003 | MEDIUM   | Wildcard resources with specific actions |
-| CG-004 | HIGH     | Known privilege-escalation paths (`iam:PassRole`, `sts:AssumeRole`, `lambda:CreateFunction`, etc.) |
+| CG-004 | HIGH     | Privilege escalation paths (`iam:PassRole`, `sts:AssumeRole`, `lambda:CreateFunction`, etc.) |
 | CG-005 | MEDIUM   | Sensitive actions without condition constraints |
 | CG-006 | HIGH     | `NotAction` with `Allow` (inverse allow = overly broad) |
-| CG-007 | HIGH     | `NotResource` with `Allow` (grants access to all *other* resources) |
+| CG-007 | HIGH     | `NotResource` with `Allow` (grants access to all other resources) |
 
-Privilege-escalation actions are based on [Rhino Security Labs' AWS privilege escalation research](https://rhinosecuritylabs.com/aws/aws-privilege-escalation-methods-mitigation/).
+Reference: [Rhino Security Labs — AWS Privilege Escalation Methods](https://rhinosecuritylabs.com/aws/aws-privilege-escalation-methods-mitigation/)
 
-## Usage
+---
+
+## Layer 1 — Core Scanner (offline, zero dependencies)
 
 ```bash
 # Scan a directory of policy files
-python cloudguard.py policies/
+python cli.py policies/
 
 # Scan a single file
-python cloudguard.py policies/admin-full-access.json
+python cli.py policies/admin-full-access.json
 
-# Show only HIGH and CRITICAL findings
-python cloudguard.py policies/ --severity high
+# Filter by severity
+python cli.py policies/ --severity high
 
-# JSON output (for CI integration or further processing)
-python cloudguard.py policies/ --output json > report.json
+# JSON output (for CI integration)
+python cli.py policies/ --output json > report.json
+
+# Original invocation still works
+python cloudguard.py policies/
 ```
 
-## Example output
+## Layer 1 — Graph Attack Path Engine
 
-```
-CloudGuard — AWS IAM Risk Analyzer
-Scanning: policies/
+Builds a directed permission graph using NetworkX and finds multi-hop privilege escalation chains via BFS — the feature AWS Access Analyzer doesn't have.
 
-[CRITICAL] CG-001: Full administrator access detected
-  File: policies/admin-full-access.json (Statement #1)
-  Detail: Action: * with Resource: * grants unrestricted access to all AWS services...
+```bash
+# Text output: print detected attack paths
+python -X utf8 cli.py policies/ --graph
 
-[HIGH] CG-004: Privilege escalation path: iam:PassRole
-  File: policies/developer-role.json (Statement #2)
-  Detail: The action 'iam:PassRole' can be used to escalate privileges...
-
-============================================================
-  SCAN SUMMARY
-============================================================
-  Total findings: 14
-  CRITICAL : 1
-  HIGH     : 7
-  MEDIUM   : 6
-  LOW      : 0
-  INFO     : 0
-============================================================
+# JSON output: full graph + paths
+python -X utf8 cli.py policies/ --graph --output json > graph.json
 ```
 
-## Exit codes
+Example output:
+```
+  ATTACK PATH GRAPH
+============================================================
+  Nodes        : 20
+  Edges        : 32
+  Attack paths : 29
+  NetworkX     : yes
 
-- `0` — No CRITICAL or HIGH findings (safe for CI gates)
-- `1` — CRITICAL or HIGH findings detected (fail the pipeline)
+  Detected Attack Paths:
 
-This makes CloudGuard usable as a CI/CD gate: add it to your pipeline and block deployments that introduce dangerous IAM policies.
+  [2 hops] developer-role.json → iam:PassRole → *
+  [2 hops] developer-role.json → lambda:CreateFunction → *
+  [2 hops] cicd-pipeline.json → sts:AssumeRole → *
+```
+
+## Layer 2 — Live AWS Scanner
+
+Pulls all IAM policies from live AWS account(s). Uses the standard SDK credential chain — no credentials are hardcoded.
+
+```bash
+# Scan current account (uses default credentials)
+python cli.py --live
+
+# Named profile
+python cli.py --live --profile my-security-profile
+
+# Multi-account
+python cli.py --live --accounts 123456789012,987654321098
+
+# Auto-discover all org accounts
+python cli.py --live --org-discovery
+
+# Combine live + graph + dashboard
+python -X utf8 cli.py --live --graph --dashboard
+```
+
+**Authentication** (uses AWS SDK credential chain — no config needed):
+1. Environment: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+2. `~/.aws/credentials` profile
+3. EC2/ECS/Lambda instance metadata
+4. AWS SSO / IAM Identity Center
+
+**Permissions needed (all read-only and free):**
+- `iam:ListRoles`, `iam:ListUsers`, `iam:ListGroups`
+- `iam:GetRole`, `iam:GetRolePolicy`, `iam:ListRolePolicies`
+- `iam:ListAttachedRolePolicies`, `iam:GetPolicyVersion`
+- `organizations:ListAccounts` (for org discovery)
+
+## Layer 3 — Exploit Generator + Terraform Remediation
+
+Generates educational boto3 PoC scripts and Terraform fixes for every finding.
+
+```bash
+# Generate PoC scripts + Terraform fixes (dry-run: print to stdout)
+python -X utf8 cli.py policies/ --exploits --remediate --dry-run
+
+# Write to files
+python -X utf8 cli.py policies/ --exploits ./out/exploits --remediate ./out/remediation
+```
+
+Every PoC script:
+- Has `DRY_RUN = True` by default (prints API calls, never executes)
+- Includes a `WARNING: FOR AUTHORIZED SECURITY TESTING ONLY` banner
+- Requires explicit `DRY_RUN = False` to run
+- Is clearly commented with defensive context
+
+## Layer 4 — Visual Dashboard
+
+Interactive Cytoscape.js graph dashboard on localhost. Dark theme, severity-colored nodes, attack path highlighting, findings panel, search.
+
+```bash
+python -X utf8 cli.py policies/ --dashboard
+python -X utf8 cli.py policies/ --dashboard --port 8080
+
+# Live data + full graph + dashboard
+python -X utf8 cli.py --live --graph --dashboard
+```
+
+Dashboard features:
+- **Graph canvas**: nodes = policies (red=CRITICAL, orange=HIGH, yellow=MEDIUM, green=clean), actions (purple), resources (diamond)
+- **Findings panel**: filterable by severity, click to highlight node
+- **Attack Paths tab**: click a path to highlight it on the graph
+- **Node detail**: click any node to see related paths and findings
+- **Search**: filter by action name, ARN, or policy file
+- **Controls**: fit, zoom in/out, re-layout
+
+## Layer 5 — CloudTrail Anomaly Detection + Honeypot
+
+```bash
+# Analyze last 24h of CloudTrail for anomalous high-risk actions
+python cli.py --live --monitor
+
+# Analyze last 48h
+python cli.py --live --monitor --monitor-hours 48
+
+# Deploy honeypot IAM role + canary S3 bucket (requires IAM write permissions)
+python cli.py --live --deploy-honeypot --confirm-deploy
+
+# Deploy with specific bucket name and Org scope
+python cli.py --live --deploy-honeypot --confirm-deploy \
+  --honeypot-bucket my-canary-bucket --org-id o-abc123
+
+# Watch for honeypot AssumeRole events (continuous polling)
+python -X utf8 cli.py --watch-honeypot arn:aws:iam::123456789012:role/cloudguard-canary-admin
+
+# With Slack/Discord webhook alert
+python -X utf8 cli.py --watch-honeypot arn:aws:iam::123456789012:role/cloudguard-canary-admin \
+  --webhook-url https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+```
+
+## Exit Codes (CI/CD integration)
+
+| Code | Meaning |
+|------|---------|
+| `0`  | No CRITICAL or HIGH findings — safe to deploy |
+| `1`  | CRITICAL or HIGH findings detected — block the pipeline |
+
+```yaml
+# GitHub Actions example
+- name: CloudGuard IAM Scan
+  run: python -X utf8 cli.py policies/ --severity high --output json > iam-report.json
+  # Fails the step if CRITICAL/HIGH findings exist
+```
 
 ## Requirements
 
-- Python 3.7+
-- **Zero external dependencies** uses only the Python standard library. Runs anywhere Python runs.
+```bash
+pip install -r requirements.txt
+```
 
-## Design decisions
+| Package    | Used for |
+|------------|----------|
+| `networkx` | Graph engine (Layer 1) |
+| `boto3`    | Live AWS scanner + CloudTrail (Layers 2, 5) |
+| `jinja2`   | PoC + Terraform template rendering (Layer 3) |
+| `flask`    | Dashboard server (Layer 4) |
 
-- **Offline-first**: Scans JSON files, not live AWS accounts. This means it works in code review, pre-deployment, and air-gapped environments.
-- **No dependencies**: Deliberate choice the tool should run on any machine without `pip install` or version conflicts. Security tooling that introduces supply-chain dependencies defeats the purpose.
-- **Severity-based filtering**: Findings are ranked CRITICAL → INFO so teams can focus on what matters. The `--severity` flag lets CI pipelines set their own threshold.
-- **Exit codes for automation**: Returns 1 on CRITICAL/HIGH findings, making it a drop-in CI gate.
-- **Extensible rules**: Each check is an independent function. Adding a new rule means writing one function and appending it to `ALL_RULES` no framework, no config files.
+All packages are optional per-feature — the core scanner (offline mode, `--graph`) requires only `networkx`.
 
-## Adding custom rules
+## Docker
+
+```bash
+docker build -t cloudguard .
+
+# Scan local policies
+docker run --rm -v $(pwd)/policies:/app/policies cloudguard policies/ --graph
+
+# Live AWS scan (pass credentials via environment)
+docker run --rm \
+  -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+  -e AWS_DEFAULT_REGION=us-east-1 \
+  cloudguard --live --graph
+
+# Dashboard (expose port)
+docker run --rm -p 5000:5000 \
+  -v $(pwd)/policies:/app/policies \
+  cloudguard policies/ --dashboard --port 5000
+```
+
+## Adding Custom Rules
 
 Every rule is a function with this signature:
 
 ```python
-def check_something(statement, idx, filename):
-    """Your check description."""
+def check_something(statement: dict, idx: int, filename: str) -> List[Finding]:
+    """CG-00X: Your description."""
     findings = []
-    # analyze statement dict, append Finding objects
+    if statement.get("Effect") != "Allow":
+        return findings
+    # analyze statement, append Finding objects
     return findings
 ```
 
-Add it to the `ALL_RULES` list and it runs automatically on every statement.
-
-## What's next
-
-- [ ] Scan IAM roles and trust policies (who can *assume* the role)
-- [ ] Cross-policy analysis (find roles that combine to enable escalation)
-- [ ] CIS Benchmark mapping for findings
-- [ ] GitHub Actions workflow for automated PR scanning
+Add it to `ALL_RULES` in `cloudguard/rules.py` — it runs automatically on every statement.
 
 ## License
 

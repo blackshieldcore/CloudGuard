@@ -67,7 +67,7 @@
 <body>
 <!-- Warning Banner -->
 <div id="warning-banner" class="warning-banner" style="display:none">
-  <span>⚠️ Graph trimmed to 100 nodes. Use --severity to narrow results. Full report available at <a href="/report.json" target="_blank">/report.json</a></span>
+  <span>⚠️ Graph trimmed to 30 nodes. Use --severity to narrow results. Full report available at <a href="/report.json" target="_blank">/report.json</a></span>
 </div>
 
 <div id="app">
@@ -390,12 +390,12 @@ function buildCytoscape() {
     return;
   }
 
-  // 3-second render timeout fallback
+  // 8-second render timeout fallback
   renderTimer = setTimeout(() => {
     if (!cyReadyFired) {
       showFallbackState();
     }
-  }, 3000);
+  }, 8000);
 
   // Map policy files → worst severity for colouring
   const policyWorstSev = {};

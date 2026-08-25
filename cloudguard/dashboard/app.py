@@ -109,20 +109,60 @@ def create_app(
     if paths is None:
         paths = []
 
-    # 3. Hard cap on graph size (nodes > 100 or edges > 300)
+    # 3. Hard cap on graph size (nodes > 30 or edges > 80)
     nodes = graph_data.get("nodes", [])
     edges = graph_data.get("edges", [])
     is_trimmed = False
 
-    if len(nodes) > 100:
-        nodes = nodes[:100]
+    if len(nodes) > 30:
+        # Prioritize keeping CRITICAL and HIGH severity nodes first, then MEDIUM, then LOW/INFO/clean
+        from pathlib import Path
+        policy_sev_scores = {}
+        for f in all_findings:
+            p_key = str(f.policy_file)
+            p_name = Path(f.policy_file).name
+            sev_val = SEVERITY_ORDER.get(f.severity, 0)
+            policy_sev_scores[p_key] = max(policy_sev_scores.get(p_key, 0), sev_val)
+            policy_sev_scores[p_name] = max(policy_sev_scores.get(p_name, 0), sev_val)
+
+        node_scores = {}
+        for n in nodes:
+            nid = n.get("id", "")
+            ntype = n.get("type", "")
+            nlabel = n.get("label", "")
+            score = 0
+            if ntype == "policy":
+                clean_id = nid.replace("policy:", "")
+                clean_name = Path(clean_id).name
+                score = max(
+                    policy_sev_scores.get(clean_id, 0),
+                    policy_sev_scores.get(clean_name, 0),
+                    policy_sev_scores.get(nlabel, 0),
+                )
+            if n.get("is_admin"):
+                score = max(score, 5)
+            if n.get("is_privesc") or n.get("is_high_risk"):
+                score = max(score, 4)
+            node_scores[nid] = score
+
+        # Propagate scores through edges (policy -> action -> resource)
+        for e in edges:
+            src = e.get("source", "")
+            dst = e.get("target", "")
+            src_score = node_scores.get(src, 0)
+            if src_score > node_scores.get(dst, 0):
+                node_scores[dst] = src_score
+
+        # Sort nodes by score descending
+        nodes = sorted(nodes, key=lambda n: node_scores.get(n["id"], 0), reverse=True)
+        nodes = nodes[:30]
         is_trimmed = True
 
     valid_node_ids = {n["id"] for n in nodes}
     edges = [e for e in edges if e["source"] in valid_node_ids and e["target"] in valid_node_ids]
 
-    if len(edges) > 300:
-        edges = edges[:300]
+    if len(edges) > 80:
+        edges = edges[:80]
         is_trimmed = True
 
     graph_data["nodes"] = nodes

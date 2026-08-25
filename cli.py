@@ -238,6 +238,8 @@ def main():
 
     # Load live AWS policies
     if args.live:
+        if not args.severity:
+            args.severity = "high"
         from cloudguard.live import AWSLiveScanner
         account_ids = None
         if args.accounts:

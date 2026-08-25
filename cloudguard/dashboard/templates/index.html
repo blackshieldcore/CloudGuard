@@ -398,10 +398,14 @@ function setSevFilter(sev) {
   renderFindings();
 }
 
-/* ── Main D3 Graph Implementation ───────────────────────────── */
-function buildD3Graph() {
+function checkWarningBanner() {
   const wb = document.getElementById('warning-banner');
   if (wb) wb.style.display = (GRAPH_DATA && GRAPH_DATA.is_trimmed) ? 'flex' : 'none';
+}
+
+/* ── Main D3 Graph Implementation ───────────────────────────── */
+function buildD3Graph() {
+  checkWarningBanner();
 
   const gd = GRAPH_DATA;
   if (!FINDINGS || FINDINGS.length === 0 || !gd || (!gd.nodes?.length && !gd.edges?.length)) {

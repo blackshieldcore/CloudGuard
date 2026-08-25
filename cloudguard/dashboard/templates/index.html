@@ -296,13 +296,13 @@ function checkWarningBanner() {
 function buildHeaderStats() {
   const el = document.getElementById('header-stats');
   const chips = [
-    { cls:'critical', num: SUMMARY.critical, label:'CRITICAL', filter:'CRITICAL', pulse: SUMMARY.critical > 0 },
+    { cls:'critical', num: SUMMARY.critical, label:'CRITICAL', filter:'CRITICAL' },
     { cls:'high',     num: SUMMARY.high,     label:'HIGH',     filter:'HIGH' },
     { cls:'medium',   num: SUMMARY.medium,   label:'MEDIUM',   filter:'MEDIUM' },
     { cls:'paths',    num: PATHS.length,     label:'Paths',    action:'paths' },
   ];
   el.innerHTML = chips.map(c => `
-    <div class="stat-chip ${c.cls} ${c.pulse ? 'pulse' : ''}" data-filter="${c.filter||''}" data-action="${c.action||''}">
+    <div class="stat-chip ${c.cls}" data-filter="${c.filter||''}" data-action="${c.action||''}">
       <span class="stat-num">${c.num}</span>
       <span class="stat-label">${c.label}</span>
     </div>
@@ -477,8 +477,8 @@ function buildD3Graph() {
         .attr('fill', color);
     }
 
-    createMarker('arrow-default', '#21262d');
-    createMarker('arrow-high-risk', '#f85149');
+    createMarker('arrow-default', '#2d333b');
+    createMarker('arrow-high-risk', '#c9504a');
     createMarker('arrow-highlighted', '#58a6ff');
 
     // Setup zoom behavior
@@ -538,12 +538,12 @@ function buildD3Graph() {
       };
     }).filter(e => nodeMap.has(e.source) && nodeMap.has(e.target));
 
-    // Staged force simulation
+    // Staged force simulation with updated enterprise parameters
     simulation = d3.forceSimulation(d3Nodes)
-      .force('link', d3.forceLink(d3Links).id(d => d.id).distance(d => (d.target.type === 'policy' || d.source.type === 'policy') ? 180 : d.target.type === 'action' ? 100 : 60))
-      .force('charge', d3.forceManyBody().strength(-400))
+      .force('link', d3.forceLink(d3Links).id(d => d.id).distance(d => (d.target.type === 'policy' || d.source.type === 'policy') ? 220 : d.target.type === 'action' ? 80 : 60))
+      .force('charge', d3.forceManyBody().strength(-800))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collide', d3.forceCollide().radius(d => d.type === 'policy' ? 90 : d.type === 'action' ? 40 : 30));
+      .force('collide', d3.forceCollide().radius(d => d.type === 'policy' ? 110 : d.type === 'action' ? 50 : 40));
 
     // Synchronously run 300 ticks to settle layout
     simulation.tick(300);
@@ -555,9 +555,9 @@ function buildD3Graph() {
       .enter()
       .append('path')
       .attr('class', d => `link ${d.is_high_risk ? 'high-risk' : ''}`)
-      .attr('stroke', d => d.is_high_risk ? '#f85149' : '#21262d')
-      .attr('stroke-width', d => d.is_high_risk ? 2 : 1.2)
-      .attr('stroke-opacity', d => d.is_high_risk ? 0.8 : 0.5)
+      .attr('stroke', d => d.is_high_risk ? '#c9504a' : '#2d333b')
+      .attr('stroke-width', d => d.is_high_risk ? 1.5 : 1)
+      .attr('stroke-opacity', d => d.is_high_risk ? 0.7 : 0.4)
       .attr('fill', 'none')
       .attr('marker-end', d => d.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)')
       .attr('d', d => drawQuadraticBezier(d.source, d.target));
@@ -583,8 +583,9 @@ function buildD3Graph() {
       .on('mouseout', function(event, d) {
         if (selectedNode) return;
         d3.select(this)
-          .attr('stroke', d.is_high_risk ? '#f85149' : '#21262d')
-          .attr('stroke-width', d.is_high_risk ? 2 : 1.2);
+          .attr('stroke', d.is_high_risk ? '#c9504a' : '#2d333b')
+          .attr('stroke-width', d.is_high_risk ? 1.5 : 1)
+          .attr('stroke-opacity', d.is_high_risk ? 0.7 : 0.4);
         const tip = document.getElementById('tooltip');
         if (tip) tip.style.display = 'none';
       });
@@ -601,19 +602,19 @@ function buildD3Graph() {
     // Render Policy Nodes (Rectangles with rounded corners rx=8)
     nodeElements.filter(d => d.type === 'policy').each(function(d) {
       const g = d3.select(this);
-      let w = 120, h = 36, fill = '#161b22', stroke = '#30363d', sw = 1.5, dotColor = '#3fb950';
+      let w = 120, h = 36, fill = '#161b22', stroke = '#30363d', sw = 1, dotColor = '#3fb950';
 
       if (d.sev === 'CRITICAL') {
-        w = 140; h = 44; fill = '#1a0a0a'; stroke = '#f85149'; sw = 2.5;
+        w = 140; h = 44; fill = '#0d1117'; stroke = '#f85149'; sw = 1.5;
         dotColor = '#f85149';
       } else if (d.sev === 'HIGH') {
-        w = 130; h = 40; fill = '#1a110a'; stroke = '#d29922'; sw = 2;
+        w = 130; h = 40; fill = '#0d1117'; stroke = '#d29922'; sw = 1.5;
         dotColor = '#d29922';
       } else if (d.sev === 'MEDIUM') {
         dotColor = '#e3b341';
       }
 
-      const rect = g.append('rect')
+      g.append('rect')
         .attr('width', w)
         .attr('height', h)
         .attr('x', -w / 2)
@@ -624,17 +625,11 @@ function buildD3Graph() {
         .attr('stroke', stroke)
         .attr('stroke-width', sw);
 
-      if (d.sev === 'CRITICAL') {
-        rect.style('filter', 'drop-shadow(0px 0px 8px rgba(248,81,73,0.5))');
-      } else if (d.sev === 'HIGH') {
-        rect.style('filter', 'drop-shadow(0px 0px 6px rgba(210,153,34,0.4))');
-      }
-
-      // Severity indicator dot
+      // Severity indicator dot (radius 3)
       g.append('circle')
         .attr('cx', -w / 2 + 14)
         .attr('cy', 0)
-        .attr('r', 4)
+        .attr('r', 3)
         .attr('fill', dotColor);
 
       // Policy label text
@@ -645,8 +640,8 @@ function buildD3Graph() {
         .attr('text-anchor', 'middle')
         .attr('font-family', 'Inter, sans-serif')
         .attr('font-size', '11px')
-        .attr('font-weight', '600')
-        .attr('fill', '#e6edf3')
+        .attr('font-weight', '500')
+        .attr('fill', '#c9d1d9')
         .text(shortLabel(d.id));
     });
 
@@ -655,9 +650,9 @@ function buildD3Graph() {
       const g = d3.select(this);
       const isHigh = d.is_admin || d.is_privesc || d.is_high_risk;
       const r = isHigh ? 18 : 14;
-      const fill = isHigh ? '#2d0f0e' : '#1c2128';
-      const stroke = isHigh ? '#f85149' : '#58a6ff';
-      const sw = isHigh ? 2 : 1.5;
+      const fill = isHigh ? '#1f1b1b' : '#1c2430';
+      const stroke = isHigh ? '#c9504a' : '#3b5068';
+      const sw = isHigh ? 1.5 : 1;
 
       g.append('circle')
         .attr('r', r)
@@ -669,8 +664,8 @@ function buildD3Graph() {
         .attr('y', r + 12)
         .attr('text-anchor', 'middle')
         .attr('font-family', 'JetBrains Mono, monospace')
-        .attr('font-size', '9px')
-        .attr('fill', '#8b949e')
+        .attr('font-size', '8px')
+        .attr('fill', '#6e7681')
         .text(shortLabel(d.id));
     });
 
@@ -684,16 +679,16 @@ function buildD3Graph() {
         .attr('x', -10)
         .attr('y', -10)
         .attr('transform', 'rotate(45)')
-        .attr('fill', '#0f1a0f')
-        .attr('stroke', '#3fb950')
-        .attr('stroke-width', 1.5);
+        .attr('fill', '#161b22')
+        .attr('stroke', '#444c56')
+        .attr('stroke-width', 1);
 
       g.append('text')
         .attr('y', 22)
         .attr('text-anchor', 'middle')
         .attr('font-family', 'JetBrains Mono, monospace')
-        .attr('font-size', '9px')
-        .attr('fill', '#484f58')
+        .attr('font-size', '8px')
+        .attr('fill', '#6e7681')
         .text(shortLabel(d.id));
     });
 
@@ -762,8 +757,8 @@ function selectNode(d) {
 
   // Highlight connected edges
   d3.selectAll('.link')
-    .attr('stroke', e => (e.source.id === d.id || e.target.id === d.id) ? '#58a6ff' : e.is_high_risk ? '#f85149' : '#21262d')
-    .attr('stroke-width', e => (e.source.id === d.id || e.target.id === d.id) ? 2.5 : e.is_high_risk ? 2 : 1.2)
+    .attr('stroke', e => (e.source.id === d.id || e.target.id === d.id) ? '#58a6ff' : e.is_high_risk ? '#c9504a' : '#2d333b')
+    .attr('stroke-width', e => (e.source.id === d.id || e.target.id === d.id) ? 2.5 : e.is_high_risk ? 1.5 : 1)
     .attr('stroke-opacity', e => (e.source.id === d.id || e.target.id === d.id) ? 1 : 0.15)
     .attr('marker-end', e => (e.source.id === d.id || e.target.id === d.id) ? 'url(#arrow-highlighted)' : e.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)');
 }
@@ -778,12 +773,12 @@ function clearHighlight() {
 
   d3.selectAll('.node rect')
     .attr('stroke', d => d.sev === 'CRITICAL' ? '#f85149' : d.sev === 'HIGH' ? '#d29922' : '#30363d')
-    .attr('stroke-width', d => d.sev === 'CRITICAL' ? 2.5 : d.sev === 'HIGH' ? 2 : 1.5);
+    .attr('stroke-width', d => (d.sev === 'CRITICAL' || d.sev === 'HIGH') ? 1.5 : 1);
 
   d3.selectAll('.link')
-    .attr('stroke', e => e.is_high_risk ? '#f85149' : '#21262d')
-    .attr('stroke-width', e => e.is_high_risk ? 2 : 1.2)
-    .attr('stroke-opacity', e => e.is_high_risk ? 0.8 : 0.5)
+    .attr('stroke', e => e.is_high_risk ? '#c9504a' : '#2d333b')
+    .attr('stroke-width', e => e.is_high_risk ? 1.5 : 1)
+    .attr('stroke-opacity', e => e.is_high_risk ? 0.7 : 0.4)
     .attr('marker-end', e => e.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)');
 }
 

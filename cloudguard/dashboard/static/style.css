@@ -76,10 +76,9 @@ header {
   grid-area: header;
   display: flex;
   align-items: center;
-  gap: 16px;
   padding: 0 24px;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border);
+  background: #010409;
+  border-bottom: 1px solid #21262d;
   backdrop-filter: blur(8px);
   z-index: 100;
 }
@@ -93,11 +92,11 @@ header {
 
 .logo-icon {
   width: 32px; height: 32px;
-  background: linear-gradient(135deg, var(--blue), var(--purple));
+  background: #1f6feb;
   border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
   font-size: 18px;
-  box-shadow: 0 0 12px rgba(88,166,255,0.4);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
 .logo-text {
@@ -126,15 +125,15 @@ header {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
-  border-radius: 20px;
+  padding: 3px 8px;
+  border-radius: 4px;
   border: 1px solid transparent;
   transition: all 0.2s;
   cursor: pointer;
 }
 
 .stat-chip .stat-num {
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1;
 }
@@ -145,15 +144,6 @@ header {
   opacity: 0.8;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-}
-
-.stat-chip.critical.pulse {
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.4); }
-  50% { box-shadow: 0 0 0 6px rgba(248, 81, 73, 0); }
 }
 
 .stat-chip:hover { filter: brightness(1.2); transform: translateY(-1px); }
@@ -441,6 +431,9 @@ header {
 svg text {
   user-select: none;
   -webkit-user-select: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-shadow: none !important;
 }
 
 .node {
@@ -450,16 +443,13 @@ svg text {
 
 .link {
   transition: opacity 0.2s;
+  stroke-dasharray: none !important;
+  animation: none !important;
 }
 
 .link.high-risk {
-  stroke-dasharray: 6, 3;
-  animation: flowDash 1s linear infinite;
-}
-
-@keyframes flowDash {
-  from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: -18; }
+  stroke-dasharray: 4, 3 !important;
+  animation: none !important;
 }
 
 .node.glowing rect {

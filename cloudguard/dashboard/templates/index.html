@@ -4,7 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CloudGuard — IAM Risk Dashboard</title>
-  <meta name="description" content="CloudGuard AWS IAM Risk Analyzer — Interactive graph visualization of IAM permission attack paths and misconfigurations." />
+  <link rel="stylesheet" href="/static/style.css" />
+  <!-- Cytoscape.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+  <script>
+    if (typeof cytoscape === 'undefined') {
+      console.error('Cytoscape failed to load from CDN');
+      document.addEventListener('DOMContentLoaded', function() {
+        var fb = document.getElementById('graph-fallback');
+        if (fb) fb.style.display = 'flex';
+      });
+    }
+  </script>
   <style>
     .warning-banner {
       background: #382e14;

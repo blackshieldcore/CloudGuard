@@ -186,10 +186,10 @@
 
 <!-- ── Data injected by Flask ──────────────────────────────── -->
 <script>
-  const GRAPH_DATA  = {{ graph_data_json|safe }};
-  const FINDINGS    = {{ findings_json|safe }};
-  const PATHS       = {{ paths_json|safe }};
-  const SUMMARY     = {{ summary|tojson }};
+  const GRAPH_DATA  = {{ graph_data_json|default('{}')|safe }};
+  const FINDINGS    = {{ findings_json|default('[]')|safe }};
+  const PATHS       = {{ paths_json|default('[]')|safe }};
+  const SUMMARY     = {{ summary|tojson|default('{}') }};
 </script>
 
 <script>
@@ -437,8 +437,8 @@ function buildD3Graph() {
   }, 15000);
 
   try {
-    const width = canvasDiv.clientWidth || 900;
-    const height = canvasDiv.clientHeight || 600;
+    const width = (canvasDiv && canvasDiv.clientWidth > 0) ? canvasDiv.clientWidth : (window.innerWidth ? window.innerWidth - 320 : 900);
+    const height = (canvasDiv && canvasDiv.clientHeight > 0) ? canvasDiv.clientHeight : (window.innerHeight ? window.innerHeight - 60 : 600);
 
     svgEl.selectAll('*').remove(); // Clear prior renders
 
@@ -512,7 +512,13 @@ function buildD3Graph() {
       .attr('stroke-width', 1)
       .attr('stroke-opacity', 0.6)
       .attr('fill', 'none')
-      .attr('d', d => `M ${d.source.x},${d.source.y} L ${d.target.x},${d.target.y}`);
+      .attr('d', d => {
+        const sx = (d.source && typeof d.source.x === 'number' && !isNaN(d.source.x)) ? d.source.x : 0;
+        const sy = (d.source && typeof d.source.y === 'number' && !isNaN(d.source.y)) ? d.source.y : 0;
+        const tx = (d.target && typeof d.target.x === 'number' && !isNaN(d.target.x)) ? d.target.x : 0;
+        const ty = (d.target && typeof d.target.y === 'number' && !isNaN(d.target.y)) ? d.target.y : 0;
+        return `M ${sx},${sy} L ${tx},${ty}`;
+      });
 
     linkElements
       .on('mouseover', function(event, d) {
@@ -544,7 +550,11 @@ function buildD3Graph() {
       .append('g')
       .attr('class', 'node')
       .attr('data-id', d => d.id)
-      .attr('transform', d => `translate(${d.x},${d.y})`);
+      .attr('transform', d => {
+        const nx = (typeof d.x === 'number' && !isNaN(d.x)) ? d.x : 0;
+        const ny = (typeof d.y === 'number' && !isNaN(d.y)) ? d.y : 0;
+        return `translate(${nx},${ny})`;
+      });
 
     nodeElements.each(function(d) {
       const g = d3.select(this);

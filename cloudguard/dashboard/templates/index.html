@@ -390,12 +390,12 @@ function buildCytoscape() {
     return;
   }
 
-  // 8-second render timeout fallback
+  // 15-second render timeout fallback
   renderTimer = setTimeout(() => {
     if (!cyReadyFired) {
       showFallbackState();
     }
-  }, 8000);
+  }, 15000);
 
   // Map policy files → worst severity for colouring
   const policyWorstSev = {};
@@ -441,6 +441,7 @@ function buildCytoscape() {
         is_admin: n.is_admin,
         is_privesc: n.is_privesc,
       },
+      position: n.position || { x: 400, y: 300 },
       classes: [n.type, n.is_admin ? 'admin' : '', n.is_privesc ? 'privesc' : ''].filter(Boolean).join(' '),
     })),
     ...gd.edges.map((e, i) => ({
@@ -475,8 +476,6 @@ function buildCytoscape() {
             'height':             32,
             'border-width':       1.5,
             'border-color':       '#30363d',
-            'transition-property': 'background-color, border-color, width, height',
-            'transition-duration':  '0.2s',
           },
         },
         {
@@ -524,8 +523,6 @@ function buildCytoscape() {
             'target-arrow-shape':  'vee',
             'curve-style':         'bezier',
             'opacity':             0.6,
-            'transition-property': 'line-color, opacity, width',
-            'transition-duration':  '0.2s',
           },
         },
         {
@@ -551,13 +548,10 @@ function buildCytoscape() {
         },
       ],
       layout: {
-        name: 'cose',
+        name: 'preset',
         animate: false,
+        fit: true,
         padding: 60,
-        nodeRepulsion: 8000,
-        idealEdgeLength: 100,
-        gravity: 0.25,
-        numIter: 1000,
       },
       wheelSensitivity: 0.3,
       minZoom: 0.1,
@@ -707,7 +701,7 @@ function bindControls() {
     if (cy) cy.zoom(cy.zoom() / 1.3);
   });
   document.getElementById('btn-layout').addEventListener('click', () => {
-    if (cy) cy.layout({ name:'cose', animate:false, padding:60, nodeRepulsion:8000, idealEdgeLength:100 }).run();
+    if (cy) cy.layout({ name:'preset', animate:false, fit:true, padding:60 }).run();
   });
 }
 

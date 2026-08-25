@@ -165,6 +165,16 @@ def create_app(
         edges = edges[:80]
         is_trimmed = True
 
+    # Pre-compute circular x/y positions for preset Cytoscape layout
+    import math
+    n_nodes = len(nodes)
+    cx, cy, radius = 400.0, 300.0, 250.0
+    for idx, node in enumerate(nodes):
+        angle = (2.0 * math.pi * idx) / n_nodes if n_nodes > 0 else 0.0
+        x = round(cx + radius * math.cos(angle), 2)
+        y = round(cy + radius * math.sin(angle), 2)
+        node["position"] = {"x": x, "y": y}
+
     graph_data["nodes"] = nodes
     graph_data["edges"] = edges
     graph_data["is_trimmed"] = is_trimmed

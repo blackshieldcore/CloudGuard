@@ -280,12 +280,12 @@ def main():
     graph_obj  = None
     paths_list = []
 
-    if args.graph or args.dashboard:
+    if args.graph:
         from cloudguard.graph import build_iam_graph, find_attack_paths, graph_to_dict
         graph_obj  = build_iam_graph(cg.get_policies())
         paths_list = find_attack_paths(graph_obj)
 
-        if args.graph and not args.dashboard:
+        if not args.dashboard:
             result = graph_to_dict(graph_obj, paths_list)
             print("\n" + "=" * 60)
             print("  ATTACK PATH GRAPH")
@@ -351,18 +351,12 @@ def main():
 
     # ── Layer 4: Dashboard (blocking — must be last) ───────────
     if args.dashboard:
-        from cloudguard.graph import build_iam_graph, find_attack_paths, graph_to_dict
         from cloudguard.dashboard.app import run_dashboard
 
-        if graph_obj is None:
-            graph_obj  = build_iam_graph(cg.get_policies())
-            paths_list = find_attack_paths(graph_obj)
-
-        graph_data = graph_to_dict(graph_obj, paths_list)
         run_dashboard(
-            graph_data=graph_data,
-            findings=filtered,
-            paths=paths_list,
+            policies=cg.get_policies(),
+            all_findings=all_findings,
+            severity=args.severity,
             port=args.port,
         )
         return  # Flask blocks here

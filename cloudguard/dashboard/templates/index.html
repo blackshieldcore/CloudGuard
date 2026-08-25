@@ -5,12 +5,71 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CloudGuard — IAM Risk Dashboard</title>
   <meta name="description" content="CloudGuard AWS IAM Risk Analyzer — Interactive graph visualization of IAM permission attack paths and misconfigurations." />
-  <link rel="stylesheet" href="/static/style.css" />
-  <!-- Cytoscape.js from CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+  <style>
+    .warning-banner {
+      background: #382e14;
+      color: #e3b341;
+      border-bottom: 1px solid #d29922;
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      text-align: center;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+    }
+    .warning-banner a {
+      color: #e3b341;
+      text-decoration: underline;
+    }
+    .warning-banner a:hover {
+      color: #f2cc60;
+    }
+    #loading-spinner, #graph-fallback, #empty-graph {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #0d1117;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 40;
+      color: #8b949e;
+      text-align: center;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    #graph-fallback .icon, #empty-graph .icon {
+      font-size: 36px;
+      margin-bottom: 12px;
+    }
+    #graph-fallback a {
+      color: #58a6ff;
+      text-decoration: underline;
+    }
+  </style>
 </head>
 
 <body>
+<!-- Warning Banner -->
+<div id="warning-banner" class="warning-banner" style="display:none">
+  <span>⚠️ Graph trimmed to 100 nodes. Use --severity to narrow results. Full report available at <a href="/report.json" target="_blank">/report.json</a></span>
+</div>
+
 <div id="app">
 
   <!-- ── Header ──────────────────────────────────────────────── -->
@@ -71,10 +130,21 @@
 
   <!-- ── Graph Canvas ────────────────────────────────────────── -->
   <main id="canvas-area">
+    <div id="loading-spinner">
+      <div class="spinner"></div>
+      <p>Loading graph visualization…</p>
+    </div>
+
     <div id="cy"></div>
+
+    <div id="graph-fallback" style="display:none">
+      <div class="icon">⚠️</div>
+      <p>Graph too large to display. <a href="/report.json" target="_blank" class="fallback-link">Download the full JSON report.</a></p>
+    </div>
+
     <div id="empty-graph" style="display:none">
-      <div class="icon">🕸</div>
-      <p>No graph data.  Run with <code>--graph</code> or <code>--live</code>.</p>
+      <div class="icon">🛡️</div>
+      <p>No IAM findings. Your policies look clean.</p>
     </div>
 
     <!-- Controls -->
@@ -196,7 +266,7 @@ function renderFindings() {
   });
 
   if (!filtered.length) {
-    list.innerHTML = `<div class="detail-empty" style="height:140px"><div class="icon">✓</div><p>No findings match.</p></div>`;
+    list.innerHTML = `<div class="detail-empty" style="height:140px"><div class="icon">🛡️</div><p>No IAM findings. Your policies look clean.</p></div>`;
     return;
   }
 
@@ -278,13 +348,54 @@ function setSevFilter(sev) {
   renderFindings();
 }
 
+/* Helper functions for UI state */
+let renderTimer = null;
+let cyReadyFired = false;
+
+function hideSpinner() {
+  const spinner = document.getElementById('loading-spinner');
+  if (spinner) spinner.style.display = 'none';
+}
+
+function showEmptyState() {
+  hideSpinner();
+  const cyEl = document.getElementById('cy');
+  if (cyEl) cyEl.style.display = 'none';
+  const emptyEl = document.getElementById('empty-graph');
+  if (emptyEl) emptyEl.style.display = 'flex';
+}
+
+function showFallbackState() {
+  hideSpinner();
+  const cyEl = document.getElementById('cy');
+  if (cyEl) cyEl.style.display = 'none';
+  const fallbackEl = document.getElementById('graph-fallback');
+  if (fallbackEl) fallbackEl.style.display = 'flex';
+}
+
+function checkWarningBanner() {
+  if (GRAPH_DATA && GRAPH_DATA.is_trimmed) {
+    const banner = document.getElementById('warning-banner');
+    if (banner) banner.style.display = 'flex';
+  }
+}
+
 /* ── Cytoscape graph ───────────────────────────────────────── */
 function buildCytoscape() {
+  checkWarningBanner();
+
   const gd = GRAPH_DATA;
-  if (!gd || (!gd.nodes?.length && !gd.edges?.length)) {
-    document.getElementById('empty-graph').style.display = 'flex';
+  if (!FINDINGS || FINDINGS.length === 0 || !gd || (!gd.nodes?.length && !gd.edges?.length)) {
+    showEmptyState();
     return;
   }
+
+  // 3-second render timeout fallback
+  renderTimer = setTimeout(() => {
+    if (!cyReadyFired) {
+      showFallbackState();
+    }
+  }, 3000);
 
   // Map policy files → worst severity for colouring
   const policyWorstSev = {};
@@ -342,115 +453,125 @@ function buildCytoscape() {
     })),
   ];
 
-  cy = cytoscape({
-    container: document.getElementById('cy'),
-    elements,
-    style: [
-      {
-        selector: 'node',
-        style: {
-          'background-color':   'data(color)',
-          'label':              'data(label)',
-          'color':              '#e6edf3',
-          'font-size':          '10px',
-          'font-family':        'JetBrains Mono, monospace',
-          'text-valign':        'bottom',
-          'text-halign':        'center',
-          'text-margin-y':      4,
-          'text-wrap':          'ellipsis',
-          'text-max-width':     '120px',
-          'width':              32,
-          'height':             32,
-          'border-width':       1.5,
-          'border-color':       '#30363d',
-          'transition-property': 'background-color, border-color, width, height',
-          'transition-duration':  '0.2s',
+  try {
+    cy = cytoscape({
+      container: document.getElementById('cy'),
+      elements,
+      style: [
+        {
+          selector: 'node',
+          style: {
+            'background-color':   'data(color)',
+            'label':              'data(label)',
+            'color':              '#e6edf3',
+            'font-size':          '10px',
+            'font-family':        'JetBrains Mono, monospace',
+            'text-valign':        'bottom',
+            'text-halign':        'center',
+            'text-margin-y':      4,
+            'text-wrap':          'ellipsis',
+            'text-max-width':     '120px',
+            'width':              32,
+            'height':             32,
+            'border-width':       1.5,
+            'border-color':       '#30363d',
+            'transition-property': 'background-color, border-color, width, height',
+            'transition-duration':  '0.2s',
+          },
         },
-      },
-      {
-        selector: 'node[type="policy"]',
-        style: {
-          shape: 'roundrectangle',
-          width: 40, height: 24,
-          'text-valign': 'center',
-          'font-size': '9px',
-          'font-weight': '600',
+        {
+          selector: 'node[type="policy"]',
+          style: {
+            shape: 'roundrectangle',
+            width: 40, height: 24,
+            'text-valign': 'center',
+            'font-size': '9px',
+            'font-weight': '600',
+          },
         },
-      },
-      {
-        selector: 'node[type="resource"]',
-        style: { shape: 'diamond', width: 28, height: 28 },
-      },
-      {
-        selector: 'node.admin',
-        style: {
-          'border-color':  '#f85149',
-          'border-width':  3,
-          'shadow-blur':   20,
-          'shadow-color':  'rgba(248,81,73,0.5)',
-          'shadow-offset-x': 0,
-          'shadow-offset-y': 0,
+        {
+          selector: 'node[type="resource"]',
+          style: { shape: 'diamond', width: 28, height: 28 },
         },
-      },
-      {
-        selector: 'node:selected',
-        style: {
-          'border-color': '#58a6ff',
-          'border-width': 3,
-          'shadow-blur':  20,
-          'shadow-color': 'rgba(88,166,255,0.5)',
-          'shadow-offset-x': 0,
-          'shadow-offset-y': 0,
+        {
+          selector: 'node.admin',
+          style: {
+            'border-color':  '#f85149',
+            'border-width':  3,
+            'shadow-blur':   20,
+            'shadow-color':  'rgba(248,81,73,0.5)',
+            'shadow-offset-x': 0,
+            'shadow-offset-y': 0,
+          },
         },
-      },
-      {
-        selector: 'edge',
-        style: {
-          'width':               1.5,
-          'line-color':          '#30363d',
-          'target-arrow-color':  '#30363d',
-          'target-arrow-shape':  'vee',
-          'curve-style':         'bezier',
-          'opacity':             0.6,
-          'transition-property': 'line-color, opacity, width',
-          'transition-duration':  '0.2s',
+        {
+          selector: 'node:selected',
+          style: {
+            'border-color': '#58a6ff',
+            'border-width': 3,
+            'shadow-blur':  20,
+            'shadow-color': 'rgba(88,166,255,0.5)',
+            'shadow-offset-x': 0,
+            'shadow-offset-y': 0,
+          },
         },
-      },
-      {
-        selector: 'edge.highlighted',
-        style: {
-          'line-color':         '#f85149',
-          'target-arrow-color': '#f85149',
-          'width':              3,
-          'opacity':            1,
-          'z-index':            10,
+        {
+          selector: 'edge',
+          style: {
+            'width':               1.5,
+            'line-color':          '#30363d',
+            'target-arrow-color':  '#30363d',
+            'target-arrow-shape':  'vee',
+            'curve-style':         'bezier',
+            'opacity':             0.6,
+            'transition-property': 'line-color, opacity, width',
+            'transition-duration':  '0.2s',
+          },
         },
-      },
-      {
-        selector: 'node.path-node',
-        style: {
-          'border-color': '#f85149',
-          'border-width': 3,
+        {
+          selector: 'edge.highlighted',
+          style: {
+            'line-color':         '#f85149',
+            'target-arrow-color': '#f85149',
+            'width':              3,
+            'opacity':            1,
+            'z-index':            10,
+          },
         },
+        {
+          selector: 'node.path-node',
+          style: {
+            'border-color': '#f85149',
+            'border-width': 3,
+          },
+        },
+        {
+          selector: 'node.dimmed, edge.dimmed',
+          style: { opacity: 0.1 },
+        },
+      ],
+      layout: {
+        name: 'cose',
+        animate: false,
+        padding: 60,
+        nodeRepulsion: 8000,
+        idealEdgeLength: 100,
+        gravity: 0.25,
+        numIter: 1000,
       },
-      {
-        selector: 'node.dimmed, edge.dimmed',
-        style: { opacity: 0.1 },
-      },
-    ],
-    layout: {
-      name: 'cose',
-      animate: false,
-      padding: 60,
-      nodeRepulsion: 8000,
-      idealEdgeLength: 100,
-      gravity: 0.25,
-      numIter: 1000,
-    },
-    wheelSensitivity: 0.3,
-    minZoom: 0.1,
-    maxZoom: 4,
-  });
+      wheelSensitivity: 0.3,
+      minZoom: 0.1,
+      maxZoom: 4,
+    });
+
+    cy.ready(function() {
+      cyReadyFired = true;
+      if (renderTimer) clearTimeout(renderTimer);
+      hideSpinner();
+    });
+  } catch (err) {
+    showFallbackState();
+  }
 
   // Node click → show detail
   cy.on('tap', 'node', function(evt) {

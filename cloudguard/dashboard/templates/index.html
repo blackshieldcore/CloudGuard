@@ -379,7 +379,8 @@ function setSevFilter(sev) {
 
 /* ── Main D3 Graph Implementation ───────────────────────────── */
 function buildD3Graph() {
-  checkWarningBanner();
+  const wb = document.getElementById('warning-banner');
+  if (wb) wb.style.display = (GRAPH_DATA && GRAPH_DATA.is_trimmed) ? 'flex' : 'none';
 
   const gd = GRAPH_DATA;
   if (!FINDINGS || FINDINGS.length === 0 || !gd || (!gd.nodes?.length && !gd.edges?.length)) {

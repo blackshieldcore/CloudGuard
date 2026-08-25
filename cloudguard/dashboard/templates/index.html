@@ -4,16 +4,26 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CloudGuard — IAM Risk Dashboard</title>
-  <link rel="stylesheet" href="/static/style.css" />
-  <!-- D3.js v7 from CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css?v=2" />
+  <!-- D3.js v7 local standalone script with CDN fallback -->
+  <script src="/static/d3.v7.min.js?v=2"></script>
   <script>
     if (typeof d3 === 'undefined') {
-      console.error('D3.js failed to load from CDN');
-      document.addEventListener('DOMContentLoaded', function() {
+      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"><\/script>');
+    }
+  </script>
+  <script>
+    if (typeof d3 === 'undefined') {
+      console.error('D3.js failed to load');
+      var onReady = function() {
         var fb = document.getElementById('graph-fallback');
         if (fb) fb.style.display = 'flex';
-      });
+      };
+      if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setTimeout(onReady, 0);
+      } else {
+        document.addEventListener('DOMContentLoaded', onReady);
+      }
     }
   </script>
   <style>
@@ -408,7 +418,7 @@ function buildD3Graph() {
   checkWarningBanner();
 
   const gd = GRAPH_DATA;
-  if (!FINDINGS || FINDINGS.length === 0 || !gd || (!gd.nodes?.length && !gd.edges?.length)) {
+  if (!FINDINGS || FINDINGS.length === 0 || !gd || ((!gd.nodes || !gd.nodes.length) && (!gd.edges || !gd.edges.length))) {
     showEmptyState();
     return;
   }
@@ -896,7 +906,11 @@ function init() {
   bindTabs();
 }
 
-document.addEventListener('DOMContentLoaded', init);
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  setTimeout(init, 0);
+} else {
+  document.addEventListener('DOMContentLoaded', init);
+}
 
 })();
 </script>

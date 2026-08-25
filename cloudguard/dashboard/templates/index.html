@@ -86,7 +86,7 @@
   <!-- ── Header ──────────────────────────────────────────────── -->
   <header>
     <a class="logo" href="/">
-      <div class="logo-icon">🛡</div>
+      <div class="logo-icon">CG</div>
       <span class="logo-text">Cloud<span>Guard</span></span>
     </a>
     <div class="header-divider"></div>
@@ -477,9 +477,9 @@ function buildD3Graph() {
         .attr('fill', color);
     }
 
-    createMarker('arrow-default', '#2d333b');
-    createMarker('arrow-high-risk', '#c9504a');
-    createMarker('arrow-highlighted', '#58a6ff');
+    createMarker('arrow-default', '#30363d');
+    createMarker('arrow-high-risk', '#cf222e');
+    createMarker('arrow-highlighted', '#2f81f7');
 
     // Setup zoom behavior
     zoomBehavior = d3.zoom()
@@ -549,15 +549,15 @@ function buildD3Graph() {
     simulation.tick(300);
     simulation.stop();
 
-    // Render Edges
+    // Render Edges (solid high-risk edges in #cf222e, normal edges in #30363d)
     const linkElements = gLinks.selectAll('path')
       .data(d3Links)
       .enter()
       .append('path')
       .attr('class', d => `link ${d.is_high_risk ? 'high-risk' : ''}`)
-      .attr('stroke', d => d.is_high_risk ? '#c9504a' : '#2d333b')
+      .attr('stroke', d => d.is_high_risk ? '#cf222e' : '#30363d')
       .attr('stroke-width', d => d.is_high_risk ? 1.5 : 1)
-      .attr('stroke-opacity', d => d.is_high_risk ? 0.7 : 0.4)
+      .attr('stroke-opacity', d => d.is_high_risk ? 0.6 : 0.35)
       .attr('fill', 'none')
       .attr('marker-end', d => d.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)')
       .attr('d', d => drawQuadraticBezier(d.source, d.target));
@@ -565,7 +565,7 @@ function buildD3Graph() {
     // Edge hover handlers
     linkElements
       .on('mouseover', function(event, d) {
-        d3.select(this).attr('stroke', '#58a6ff').attr('stroke-width', 2.5);
+        d3.select(this).attr('stroke', '#2f81f7').attr('stroke-width', 2.5);
         const tip = document.getElementById('tooltip');
         if (tip) {
           tip.style.display = 'block';
@@ -583,9 +583,9 @@ function buildD3Graph() {
       .on('mouseout', function(event, d) {
         if (selectedNode) return;
         d3.select(this)
-          .attr('stroke', d.is_high_risk ? '#c9504a' : '#2d333b')
+          .attr('stroke', d.is_high_risk ? '#cf222e' : '#30363d')
           .attr('stroke-width', d.is_high_risk ? 1.5 : 1)
-          .attr('stroke-opacity', d.is_high_risk ? 0.7 : 0.4);
+          .attr('stroke-opacity', d.is_high_risk ? 0.6 : 0.35);
         const tip = document.getElementById('tooltip');
         if (tip) tip.style.display = 'none';
       });
@@ -650,8 +650,8 @@ function buildD3Graph() {
       const g = d3.select(this);
       const isHigh = d.is_admin || d.is_privesc || d.is_high_risk;
       const r = isHigh ? 18 : 14;
-      const fill = isHigh ? '#1f1b1b' : '#1c2430';
-      const stroke = isHigh ? '#c9504a' : '#3b5068';
+      const fill = '#161b22';
+      const stroke = isHigh ? '#cf222e' : '#30363d';
       const sw = isHigh ? 1.5 : 1;
 
       g.append('circle')
@@ -665,7 +665,7 @@ function buildD3Graph() {
         .attr('text-anchor', 'middle')
         .attr('font-family', 'JetBrains Mono, monospace')
         .attr('font-size', '8px')
-        .attr('fill', '#6e7681')
+        .attr('fill', '#57606a')
         .text(shortLabel(d.id));
     });
 
@@ -680,7 +680,7 @@ function buildD3Graph() {
         .attr('y', -10)
         .attr('transform', 'rotate(45)')
         .attr('fill', '#161b22')
-        .attr('stroke', '#444c56')
+        .attr('stroke', '#30363d')
         .attr('stroke-width', 1);
 
       g.append('text')
@@ -688,7 +688,7 @@ function buildD3Graph() {
         .attr('text-anchor', 'middle')
         .attr('font-family', 'JetBrains Mono, monospace')
         .attr('font-size', '8px')
-        .attr('fill', '#6e7681')
+        .attr('fill', '#57606a')
         .text(shortLabel(d.id));
     });
 
@@ -751,15 +751,15 @@ function selectNode(d) {
     if (e.target.id === d.id) connectedIds.add(e.source.id);
   });
 
-  // Dim non-connected nodes to 0.15 opacity
+  // Dim non-connected nodes to 0.2 opacity
   d3.selectAll('.node')
-    .attr('opacity', n => connectedIds.has(n.id) ? 1 : 0.15);
+    .attr('opacity', n => connectedIds.has(n.id) ? 1 : 0.2);
 
   // Highlight connected edges
   d3.selectAll('.link')
-    .attr('stroke', e => (e.source.id === d.id || e.target.id === d.id) ? '#58a6ff' : e.is_high_risk ? '#c9504a' : '#2d333b')
+    .attr('stroke', e => (e.source.id === d.id || e.target.id === d.id) ? '#2f81f7' : e.is_high_risk ? '#cf222e' : '#30363d')
     .attr('stroke-width', e => (e.source.id === d.id || e.target.id === d.id) ? 2.5 : e.is_high_risk ? 1.5 : 1)
-    .attr('stroke-opacity', e => (e.source.id === d.id || e.target.id === d.id) ? 1 : 0.15)
+    .attr('stroke-opacity', e => (e.source.id === d.id || e.target.id === d.id) ? 1 : 0.2)
     .attr('marker-end', e => (e.source.id === d.id || e.target.id === d.id) ? 'url(#arrow-highlighted)' : e.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)');
 }
 
@@ -768,17 +768,16 @@ function clearHighlight() {
   highlightedPath = null;
 
   d3.selectAll('.node')
-    .attr('opacity', 1)
-    .classed('glowing', false);
+    .attr('opacity', 1);
 
   d3.selectAll('.node rect')
     .attr('stroke', d => d.sev === 'CRITICAL' ? '#f85149' : d.sev === 'HIGH' ? '#d29922' : '#30363d')
     .attr('stroke-width', d => (d.sev === 'CRITICAL' || d.sev === 'HIGH') ? 1.5 : 1);
 
   d3.selectAll('.link')
-    .attr('stroke', e => e.is_high_risk ? '#c9504a' : '#2d333b')
+    .attr('stroke', e => e.is_high_risk ? '#cf222e' : '#30363d')
     .attr('stroke-width', e => e.is_high_risk ? 1.5 : 1)
-    .attr('stroke-opacity', e => e.is_high_risk ? 0.7 : 0.4)
+    .attr('stroke-opacity', e => e.is_high_risk ? 0.6 : 0.35)
     .attr('marker-end', e => e.is_high_risk ? 'url(#arrow-high-risk)' : 'url(#arrow-default)');
 }
 
@@ -790,11 +789,6 @@ function highlightNodeByFile(policyFile) {
   if (node) {
     selectNode(node);
     zoomToNode(node);
-
-    // Flash brief glow animation on target policy node
-    d3.selectAll('.node')
-      .filter(d => d.id === node.id)
-      .classed('glowing', true);
   }
 }
 

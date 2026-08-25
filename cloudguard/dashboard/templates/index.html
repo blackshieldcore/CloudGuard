@@ -443,6 +443,9 @@ function buildD3Graph() {
     svgEl.selectAll('*').remove(); // Clear prior renders
 
     zoomBehavior = d3.zoom()
+      .filter(event => {
+        return event.target === svgEl.node() || event.target.closest('#graph-container') === null || event.type === 'wheel';
+      })
       .scaleExtent([0.2, 4])
       .on('zoom', (event) => {
         gContainer.attr('transform', event.transform);
@@ -648,6 +651,36 @@ function buildD3Graph() {
         event.stopPropagation();
         zoomToNode(d);
       });
+
+    const drag = d3.drag()
+      .on('start', function(event, d) {
+        event.sourceEvent.stopPropagation();
+        d3.select(this).raise();
+      })
+      .on('drag', function(event, d) {
+        d.x = event.x;
+        d.y = event.y;
+        d.fx = event.x;
+        d.fy = event.y;
+        d3.select(this).attr('transform', `translate(${event.x},${event.y})`);
+        // Update connected edges
+        linkElements
+          .attr('d', e => {
+            const sx = e.source.fx ?? e.source.x;
+            const sy = e.source.fy ?? e.source.y;
+            const tx = e.target.fx ?? e.target.x;
+            const ty = e.target.fy ?? e.target.y;
+            return `M ${sx},${sy} L ${tx},${ty}`;
+          });
+      })
+      .on('end', function(event, d) {
+        d.x = event.x;
+        d.y = event.y;
+        d.fx = event.x;
+        d.fy = event.y;
+      });
+
+    nodeElements.call(drag);
 
     d3ReadyFired = true;
     if (renderTimer) clearTimeout(renderTimer);

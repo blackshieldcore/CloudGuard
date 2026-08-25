@@ -225,6 +225,27 @@ const NODE_COLORS = {
   privesc:   '#d29922',
 };
 
+function hideSpinner() {
+  const el = document.getElementById('loading-spinner');
+  if (el) el.style.display = 'none';
+}
+
+function showFallbackState() {
+  hideSpinner();
+  const el = document.getElementById('graph-fallback');
+  if (el) el.style.display = 'flex';
+  const cy = document.getElementById('d3-graph');
+  if (cy) cy.style.display = 'none';
+}
+
+function showEmptyState() {
+  hideSpinner();
+  const el = document.getElementById('empty-graph');
+  if (el) el.style.display = 'flex';
+  const cy = document.getElementById('d3-graph');
+  if (cy) cy.style.display = 'none';
+}
+
 /* ── Helpers ───────────────────────────────────────────────── */
 function shortLabel(id) {
   if (!id) return id;

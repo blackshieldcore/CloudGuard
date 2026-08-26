@@ -1,7 +1,7 @@
 """
-cloudguard/remediate.py
-~~~~~~~~~~~~~~~~~~~~~~~
-Terraform remediation generator for CloudGuard findings.
+meridian/remediate.py
+~~~~~~~~~~~~~~~~~~~~~
+Terraform remediation generator for Meridian findings.
 
 For each finding, generates a Terraform HCL snippet that represents the
 FIXED version of the policy: scoped resources, explicit actions, added
@@ -23,7 +23,7 @@ try:
 except ImportError:
     HAS_JINJA2 = False
 
-from cloudguard.core import Finding
+from meridian.core import Finding
 
 
 # ──────────────────────────────────────────────
@@ -32,7 +32,7 @@ from cloudguard.core import Finding
 
 TF_HEADER = """\
 # ──────────────────────────────────────────────────────────────────
-# CloudGuard Remediation — {{ rule_id }}: {{ title }}
+# Meridian Remediation — {{ rule_id }}: {{ title }}
 # Source: {{ policy_file }} (Statement #{{ statement_idx }})
 #
 # This snippet shows the FIXED version of the flagged policy statement.
@@ -43,7 +43,7 @@ TF_HEADER = """\
 
 TEMPLATES: Dict[str, str] = {
 
-"CG-001": TF_HEADER + """\
+"MR-001": TF_HEADER + """\
 # FIX: Replace AdministratorAccess with least-privilege.
 # Only grant the specific actions your principal actually needs.
 
@@ -78,10 +78,10 @@ data "aws_iam_policy_document" "least_privilege_replace_cg001" {
 }
 """,
 
-"CG-002": TF_HEADER + """\
+"MR-002": TF_HEADER + """\
 # FIX: Replace service wildcard (e.g., s3:*) with specific actions.
 
-data "aws_iam_policy_document" "scoped_actions_cg002" {
+data "aws_iam_policy_document" "scoped_actions_mr002" {
   statement {
     sid    = "ScopedServiceAccess"
     effect = "Allow"
@@ -102,10 +102,10 @@ data "aws_iam_policy_document" "scoped_actions_cg002" {
 }
 """,
 
-"CG-003": TF_HEADER + """\
+"MR-003": TF_HEADER + """\
 # FIX: Replace Resource:* with specific ARNs.
 
-data "aws_iam_policy_document" "scoped_resources_cg003" {
+data "aws_iam_policy_document" "scoped_resources_mr003" {
   statement {
     sid    = "ScopedResources"
     effect = "Allow"
@@ -125,13 +125,13 @@ data "aws_iam_policy_document" "scoped_resources_cg003" {
 }
 """,
 
-"CG-004-iam:PassRole": TF_HEADER + """\
+"MR-004-iam:PassRole": TF_HEADER + """\
 # FIX: Restrict iam:PassRole to specific roles + add service condition.
 #
 # Without restriction, iam:PassRole on Resource:* lets any role be passed
 # to any service, enabling privilege escalation via Lambda, EC2, etc.
 
-data "aws_iam_policy_document" "restricted_passrole_cg004" {
+data "aws_iam_policy_document" "restricted_passrole_mr004" {
   statement {
     sid    = "RestrictedPassRole"
     effect = "Allow"
@@ -167,10 +167,10 @@ data "aws_iam_policy_document" "restricted_passrole_cg004" {
 }
 """,
 
-"CG-004-sts:AssumeRole": TF_HEADER + """\
+"MR-004-sts:AssumeRole": TF_HEADER + """\
 # FIX: Restrict sts:AssumeRole to specific role ARNs + add Org/ExternalId condition.
 
-data "aws_iam_policy_document" "restricted_assumerole_cg004" {
+data "aws_iam_policy_document" "restricted_assumerole_mr004" {
   statement {
     sid    = "RestrictedAssumeRole"
     effect = "Allow"
@@ -208,10 +208,10 @@ data "aws_iam_policy_document" "target_role_trust" {
 }
 """,
 
-"CG-005": TF_HEADER + """\
+"MR-005": TF_HEADER + """\
 # FIX: Add a Condition block to restrict sensitive action by IP or MFA.
 
-data "aws_iam_policy_document" "conditioned_access_cg005" {
+data "aws_iam_policy_document" "conditioned_access_mr005" {
   statement {
     sid    = "ConditionedSensitiveAccess"
     effect = "Allow"
@@ -244,13 +244,13 @@ data "aws_iam_policy_document" "conditioned_access_cg005" {
 }
 """,
 
-"CG-006": TF_HEADER + """\
+"MR-006": TF_HEADER + """\
 # FIX: Replace NotAction+Allow with an explicit action allowlist.
 #
 # NotAction with Allow is almost never intentional — it grants access to
 # EVERY action except the listed ones.  Replace with explicit actions.
 
-data "aws_iam_policy_document" "explicit_allow_cg006" {
+data "aws_iam_policy_document" "explicit_allow_mr006" {
   # Instead of NotAction, list exactly what the CI/CD pipeline needs
   statement {
     sid    = "CICDExplicitActions"
@@ -278,13 +278,13 @@ data "aws_iam_policy_document" "explicit_allow_cg006" {
 }
 """,
 
-"CG-007": TF_HEADER + """\
+"MR-007": TF_HEADER + """\
 # FIX: Replace NotResource+Allow with explicit resource allowlist.
 #
 # NotResource with Allow grants access to ALL resources except the listed
 # ones.  Replace with the specific resources the principal actually needs.
 
-data "aws_iam_policy_document" "explicit_resources_cg007" {
+data "aws_iam_policy_document" "explicit_resources_mr007" {
   statement {
     sid    = "ExplicitResourceAccess"
     effect = "Allow"
@@ -305,7 +305,7 @@ data "aws_iam_policy_document" "explicit_resources_cg007" {
 
 
 class RemediationGenerator:
-    """Generates Terraform HCL remediation snippets for CloudGuard findings."""
+    """Generates Terraform HCL remediation snippets for Meridian findings."""
 
     def __init__(self):
         if HAS_JINJA2:
@@ -326,13 +326,13 @@ class RemediationGenerator:
         """Return a Terraform HCL snippet fixing the given finding."""
         rule_id = finding.rule_id
 
-        if rule_id == "CG-004":
+        if rule_id == "MR-004" or rule_id == "CG-004":
             if "iam:PassRole" in finding.title or "lambda" in finding.title.lower():
-                tpl = TEMPLATES.get("CG-004-iam:PassRole", TEMPLATES.get("CG-003", ""))
+                tpl = TEMPLATES.get("MR-004-iam:PassRole", TEMPLATES.get("MR-003", ""))
             elif "sts:AssumeRole" in finding.title:
-                tpl = TEMPLATES.get("CG-004-sts:AssumeRole", TEMPLATES.get("CG-003", ""))
+                tpl = TEMPLATES.get("MR-004-sts:AssumeRole", TEMPLATES.get("MR-003", ""))
             else:
-                tpl = TEMPLATES.get("CG-004-iam:PassRole", TEMPLATES.get("CG-003", ""))
+                tpl = TEMPLATES.get("MR-004-iam:PassRole", TEMPLATES.get("MR-003", ""))
         else:
             tpl = TEMPLATES.get(rule_id, "")
 

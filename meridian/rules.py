@@ -1,7 +1,7 @@
 """
-cloudguard/rules.py
-~~~~~~~~~~~~~~~~~~~
-All IAM risk detection rules for CloudGuard.
+meridian/rules.py
+~~~~~~~~~~~~~~~~~
+All IAM risk detection rules for Meridian.
 
 Each rule is a function with signature:
     check_something(statement: dict, idx: int, filename: str) -> List[Finding]
@@ -12,7 +12,7 @@ References:
   https://rhinosecuritylabs.com/aws/aws-privilege-escalation-methods-mitigation/
 """
 
-from cloudguard.core import Finding, normalize_to_list
+from meridian.core import Finding, normalize_to_list
 
 
 # ──────────────────────────────────────────────
@@ -69,11 +69,11 @@ def extract_service(action: str) -> str:
 
 
 # ──────────────────────────────────────────────
-# Detection Rules — CG-001 through CG-007
+# Detection Rules — MR-001 through MR-007
 # ──────────────────────────────────────────────
 
 def check_admin_access(statement, idx, filename):
-    """CG-001: Detects full admin access (Action: *, Resource: *)."""
+    """MR-001: Detects full admin access (Action: *, Resource: *)."""
     findings = []
     if statement.get("Effect") != "Allow":
         return findings
@@ -85,7 +85,7 @@ def check_admin_access(statement, idx, filename):
         findings.append(
             Finding(
                 severity="CRITICAL",
-                rule_id="CG-001",
+                rule_id="MR-001",
                 title="Full administrator access detected",
                 detail=(
                     "Action: * with Resource: * grants unrestricted access to all AWS services "
@@ -100,7 +100,7 @@ def check_admin_access(statement, idx, filename):
 
 
 def check_wildcard_actions(statement, idx, filename):
-    """CG-002: Detects wildcard actions on specific services (e.g., 's3:*')."""
+    """MR-002: Detects wildcard actions on specific services (e.g., 's3:*')."""
     findings = []
     if statement.get("Effect") != "Allow":
         return findings
@@ -113,7 +113,7 @@ def check_wildcard_actions(statement, idx, filename):
             findings.append(
                 Finding(
                     severity=severity,
-                    rule_id="CG-002",
+                    rule_id="MR-002",
                     title=f"Wildcard actions on {service} service",
                     detail=(
                         f"'{action}' grants all actions on the {service} service. "
@@ -127,7 +127,7 @@ def check_wildcard_actions(statement, idx, filename):
 
 
 def check_wildcard_resources(statement, idx, filename):
-    """CG-003: Detects wildcard resources with specific actions."""
+    """MR-003: Detects wildcard resources with specific actions."""
     findings = []
     if statement.get("Effect") != "Allow":
         return findings
@@ -142,7 +142,7 @@ def check_wildcard_resources(statement, idx, filename):
         findings.append(
             Finding(
                 severity="MEDIUM",
-                rule_id="CG-003",
+                rule_id="MR-003",
                 title="Wildcard resource with specific actions",
                 detail=(
                     f"Actions [{action_list}] are allowed on all resources (*). "
@@ -156,7 +156,7 @@ def check_wildcard_resources(statement, idx, filename):
 
 
 def check_privilege_escalation(statement, idx, filename):
-    """CG-004: Detects actions that enable privilege escalation."""
+    """MR-004: Detects actions that enable privilege escalation."""
     findings = []
     if statement.get("Effect") != "Allow":
         return findings
@@ -167,7 +167,7 @@ def check_privilege_escalation(statement, idx, filename):
             findings.append(
                 Finding(
                     severity="HIGH",
-                    rule_id="CG-004",
+                    rule_id="MR-004",
                     title=f"Privilege escalation path: {action}",
                     detail=(
                         f"The action '{action}' can be used to escalate privileges. "
@@ -182,7 +182,7 @@ def check_privilege_escalation(statement, idx, filename):
 
 
 def check_missing_conditions(statement, idx, filename):
-    """CG-005: Detects sensitive actions without condition constraints."""
+    """MR-005: Detects sensitive actions without condition constraints."""
     findings = []
     if statement.get("Effect") != "Allow":
         return findings
@@ -196,7 +196,7 @@ def check_missing_conditions(statement, idx, filename):
                 findings.append(
                     Finding(
                         severity="MEDIUM",
-                        rule_id="CG-005",
+                        rule_id="MR-005",
                         title=f"Sensitive action without conditions: {action}",
                         detail=(
                             f"'{action}' is allowed without any Condition block. "
@@ -210,14 +210,14 @@ def check_missing_conditions(statement, idx, filename):
 
 
 def check_not_action(statement, idx, filename):
-    """CG-006: Detects use of NotAction with Allow (inverse allow = broad access)."""
+    """MR-006: Detects use of NotAction with Allow (inverse allow = broad access)."""
     findings = []
     if statement.get("Effect") == "Allow" and "NotAction" in statement:
         not_actions = normalize_to_list(statement.get("NotAction", []))
         findings.append(
             Finding(
                 severity="HIGH",
-                rule_id="CG-006",
+                rule_id="MR-006",
                 title="NotAction with Allow effect",
                 detail=(
                     f"Using NotAction with Allow means 'allow everything EXCEPT {not_actions}'. "
@@ -231,13 +231,13 @@ def check_not_action(statement, idx, filename):
 
 
 def check_not_resource(statement, idx, filename):
-    """CG-007: Detects use of NotResource with Allow."""
+    """MR-007: Detects use of NotResource with Allow."""
     findings = []
     if statement.get("Effect") == "Allow" and "NotResource" in statement:
         findings.append(
             Finding(
                 severity="HIGH",
-                rule_id="CG-007",
+                rule_id="MR-007",
                 title="NotResource with Allow effect",
                 detail=(
                     "Using NotResource with Allow means 'allow on all resources EXCEPT the listed ones'. "

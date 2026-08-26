@@ -1,13 +1,13 @@
-# CloudGuard — AWS IAM Risk Analyzer
+# Meridian — IAM Risk Intelligence
 
 A multi-layer AWS IAM security tool that scans policy documents, builds attack path graphs, pulls live AWS inventory, generates Terraform remediations, and visualizes everything in an interactive dashboard.
 
 ## Architecture
 
 ```
-cloudguard/
-├── core.py          ← CloudGuard class (policy loading, analysis)
-├── rules.py         ← 7 detection rules (CG-001 → CG-007), extensible
+meridian/
+├── core.py          ← Meridian class (policy loading, analysis)
+├── rules.py         ← 7 detection rules (MR-001 → MR-007), extensible
 ├── graph.py         ← NetworkX attack path engine (BFS multi-hop)
 ├── live.py          ← Live AWS IAM scanner (boto3)
 ├── exploits.py      ← Defensive PoC script generator (Jinja2)
@@ -16,11 +16,11 @@ cloudguard/
 └── dashboard/
     ├── app.py       ← Flask API server
     ├── templates/
-    │   └── index.html   ← Cytoscape.js interactive graph (dark theme)
+    │   └── index.html   ← Interactive D3.js graph (dark theme)
     └── static/
         └── style.css    ← Premium dark dashboard CSS
 cli.py               ← Unified CLI entry point (all flags)
-cloudguard.py        ← Backward-compat shim (original invocation still works)
+meridian.py          ← Entrypoint shim (original invocation still works)
 requirements.txt
 Dockerfile
 ```
@@ -29,13 +29,13 @@ Dockerfile
 
 | Rule   | Severity | Description |
 |--------|----------|-------------|
-| CG-001 | CRITICAL | Full admin access (`Action: *`, `Resource: *`) |
-| CG-002 | HIGH/MED | Wildcard service actions (e.g., `s3:*`, `iam:*`) |
-| CG-003 | MEDIUM   | Wildcard resources with specific actions |
-| CG-004 | HIGH     | Privilege escalation paths (`iam:PassRole`, `sts:AssumeRole`, `lambda:CreateFunction`, etc.) |
-| CG-005 | MEDIUM   | Sensitive actions without condition constraints |
-| CG-006 | HIGH     | `NotAction` with `Allow` (inverse allow = overly broad) |
-| CG-007 | HIGH     | `NotResource` with `Allow` (grants access to all other resources) |
+| MR-001 | CRITICAL | Full admin access (`Action: *`, `Resource: *`) |
+| MR-002 | HIGH/MED | Wildcard service actions (e.g., `s3:*`, `iam:*`) |
+| MR-003 | MEDIUM   | Wildcard resources with specific actions |
+| MR-004 | HIGH     | Privilege escalation paths (`iam:PassRole`, `sts:AssumeRole`, `lambda:CreateFunction`, etc.) |
+| MR-005 | MEDIUM   | Sensitive actions without condition constraints |
+| MR-006 | HIGH     | `NotAction` with `Allow` (inverse allow = overly broad) |
+| MR-007 | HIGH     | `NotResource` with `Allow` (grants access to all other resources) |
 
 Reference: [Rhino Security Labs — AWS Privilege Escalation Methods](https://rhinosecuritylabs.com/aws/aws-privilege-escalation-methods-mitigation/)
 
@@ -56,8 +56,8 @@ python cli.py policies/ --severity high
 # JSON output (for CI integration)
 python cli.py policies/ --output json > report.json
 
-# Original invocation still works
-python cloudguard.py policies/
+# Direct shim execution
+python meridian.py policies/
 ```
 
 ## Layer 1 — Graph Attack Path Engine
@@ -141,7 +141,7 @@ Every PoC script:
 
 ## Layer 4 — Visual Dashboard
 
-Interactive Cytoscape.js graph dashboard on localhost. Dark theme, severity-colored nodes, attack path highlighting, findings panel, search.
+Interactive D3.js graph dashboard on localhost. Dark theme, severity-colored border cards, attack path highlighting, findings panel, search.
 
 ```bash
 python -X utf8 cli.py policies/ --dashboard
@@ -152,7 +152,7 @@ python -X utf8 cli.py --live --graph --dashboard
 ```
 
 Dashboard features:
-- **Graph canvas**: nodes = policies (red=CRITICAL, orange=HIGH, yellow=MEDIUM, green=clean), actions (purple), resources (diamond)
+- **Graph canvas**: nodes = policies, actions, resources
 - **Findings panel**: filterable by severity, click to highlight node
 - **Attack Paths tab**: click a path to highlight it on the graph
 - **Node detail**: click any node to see related paths and findings
@@ -176,10 +176,10 @@ python cli.py --live --deploy-honeypot --confirm-deploy \
   --honeypot-bucket my-canary-bucket --org-id o-abc123
 
 # Watch for honeypot AssumeRole events (continuous polling)
-python -X utf8 cli.py --watch-honeypot arn:aws:iam::123456789012:role/cloudguard-canary-admin
+python -X utf8 cli.py --watch-honeypot arn:aws:iam::123456789012:role/meridian-canary-admin
 
 # With Slack/Discord webhook alert
-python -X utf8 cli.py --watch-honeypot arn:aws:iam::123456789012:role/cloudguard-canary-admin \
+python -X utf8 cli.py --watch-honeypot arn:aws:iam::123456789012:role/meridian-canary-admin \
   --webhook-url https://hooks.slack.com/services/YOUR/WEBHOOK/URL
 ```
 
@@ -192,7 +192,7 @@ python -X utf8 cli.py --watch-honeypot arn:aws:iam::123456789012:role/cloudguard
 
 ```yaml
 # GitHub Actions example
-- name: CloudGuard IAM Scan
+- name: Meridian IAM Scan
   run: python -X utf8 cli.py policies/ --severity high --output json > iam-report.json
   # Fails the step if CRITICAL/HIGH findings exist
 ```
@@ -215,22 +215,22 @@ All packages are optional per-feature — the core scanner (offline mode, `--gra
 ## Docker
 
 ```bash
-docker build -t cloudguard .
+docker build -t meridian .
 
 # Scan local policies
-docker run --rm -v $(pwd)/policies:/app/policies cloudguard policies/ --graph
+docker run --rm -v $(pwd)/policies:/app/policies meridian policies/ --graph
 
 # Live AWS scan (pass credentials via environment)
 docker run --rm \
   -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
   -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
   -e AWS_DEFAULT_REGION=us-east-1 \
-  cloudguard --live --graph
+  meridian --live --graph
 
 # Dashboard (expose port)
 docker run --rm -p 5000:5000 \
   -v $(pwd)/policies:/app/policies \
-  cloudguard policies/ --dashboard --port 5000
+  meridian policies/ --dashboard --port 5000
 ```
 
 ## Adding Custom Rules
@@ -239,7 +239,7 @@ Every rule is a function with this signature:
 
 ```python
 def check_something(statement: dict, idx: int, filename: str) -> List[Finding]:
-    """CG-00X: Your description."""
+    """MR-00X: Your description."""
     findings = []
     if statement.get("Effect") != "Allow":
         return findings
@@ -247,7 +247,7 @@ def check_something(statement: dict, idx: int, filename: str) -> List[Finding]:
     return findings
 ```
 
-Add it to `ALL_RULES` in `cloudguard/rules.py` — it runs automatically on every statement.
+Add it to `ALL_RULES` in `meridian/rules.py` — it runs automatically on every statement.
 
 ## License
 

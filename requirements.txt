@@ -1,4 +1,4 @@
-# CloudGuard — AWS IAM Risk Analyzer
+# Meridian — IAM Risk Intelligence
 # Core (required)
 networkx>=3.0
 

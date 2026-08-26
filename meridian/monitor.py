@@ -1,6 +1,6 @@
 """
-cloudguard/monitor.py
-~~~~~~~~~~~~~~~~~~~~~
+meridian/monitor.py
+~~~~~~~~~~~~~~~~~~~
 CloudTrail anomaly detection and IAM honeypot deployer.
 
 CloudTrailMonitor:
@@ -10,7 +10,7 @@ CloudTrailMonitor:
   HIGH-risk edge.
 
 HoneypotDeployer:
-  Creates a decoy IAM role (cloudguard-canary-admin) that looks attractive
+  Creates a decoy IAM role (meridian-canary-admin) that looks attractive
   to an attacker probing for privilege escalation.  Monitors CloudTrail for
   AssumeRole events on the honeypot ARN and fires a webhook alert.
 
@@ -41,7 +41,7 @@ try:
 except ImportError:
     HAS_URLLIB = False
 
-from cloudguard.rules import PRIVESC_ACTIONS, HIGH_RISK_SERVICES
+from meridian.rules import PRIVESC_ACTIONS, HIGH_RISK_SERVICES
 
 
 # ──────────────────────────────────────────────
@@ -165,16 +165,16 @@ class CloudTrailMonitor:
 # Honeypot Deployer
 # ──────────────────────────────────────────────
 
-HONEYPOT_ROLE_NAME   = "cloudguard-canary-admin"
-HONEYPOT_POLICY_NAME = "cloudguard-canary-policy"
-HONEYPOT_BUCKET_PREFIX = "cloudguard-canary-"
+HONEYPOT_ROLE_NAME   = "meridian-canary-admin"
+HONEYPOT_POLICY_NAME = "meridian-canary-policy"
+HONEYPOT_BUCKET_PREFIX = "meridian-canary-"
 
 DECOY_SECRET_CONTENT = json.dumps({
     "description": "AWS master credentials — DO NOT SHARE",
     "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
     "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
     "region": "us-east-1",
-    "note": "These are fake credentials placed by CloudGuard honeypot.",
+    "note": "These are fake credentials placed by Meridian honeypot.",
 }, indent=2)
 
 
@@ -301,12 +301,12 @@ class HoneypotDeployer:
                 RoleName=HONEYPOT_ROLE_NAME,
                 AssumeRolePolicyDocument=json.dumps(trust_policy),
                 Description=(
-                    "CloudGuard canary role — DO NOT USE. "
+                    "Meridian canary role — DO NOT USE. "
                     "Monitors for unauthorized AssumeRole attempts."
                 ),
                 Tags=[
-                    {"Key": "cloudguard:honeypot", "Value": "true"},
-                    {"Key": "cloudguard:created", "Value": datetime.now().isoformat()},
+                    {"Key": "meridian:honeypot", "Value": "true"},
+                    {"Key": "meridian:created", "Value": datetime.now().isoformat()},
                 ],
             )
             return response["Role"]["Arn"]
@@ -447,7 +447,7 @@ def _fire_alert(alert: dict, webhook_url: Optional[str]):
 
     # Slack/Discord compatible payload
     payload = json.dumps({
-        "text": f"*CloudGuard Honeypot Alert* 🚨\n```{json.dumps(alert, indent=2)}```"
+        "text": f"*Meridian Honeypot Alert* 🚨\n```{json.dumps(alert, indent=2)}```"
     }).encode("utf-8")
 
     try:

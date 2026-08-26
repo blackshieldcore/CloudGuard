@@ -41,15 +41,15 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
     except AttributeError:
         pass  # Python < 3.7 fallback
 
-from cloudguard.core import CloudGuard, SEVERITY_ORDER, print_summary
+from meridian.core import Meridian, CloudGuard, SEVERITY_ORDER, print_summary
 
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="cloudguard",
+        prog="meridian",
         description=(
-            "CloudGuard — AWS IAM Risk Analyzer\n"
+            "Meridian — IAM Risk Intelligence\n"
             "Scans IAM policy files (offline) or live AWS accounts for "
             "misconfigurations, privilege-escalation paths, and attack graphs."
         ),
@@ -214,7 +214,7 @@ def main():
 
     # ── Early exit: watch-honeypot runs standalone ─────────────
     if args.watch_honeypot:
-        from cloudguard.monitor import watch_honeypot
+        from meridian.monitor import watch_honeypot
         watch_honeypot(
             role_arn=args.watch_honeypot,
             webhook_url=args.webhook_url,
@@ -226,10 +226,10 @@ def main():
         parser.error("Provide a path to scan or use --live to pull from AWS.")
 
     # ── Print banner (original behaviour) ─────────────────────
-    print("\nCloudGuard — AWS IAM Risk Analyzer")
+    print("\nMeridian — IAM Risk Intelligence")
 
-    # ── Build CloudGuard instance ──────────────────────────────
-    cg = CloudGuard()
+    # ── Build Meridian instance ──────────────────────────────
+    cg = Meridian()
 
     # Load local files
     if args.path:
@@ -240,7 +240,7 @@ def main():
     if args.live:
         if not args.severity:
             args.severity = "high"
-        from cloudguard.live import AWSLiveScanner
+        from meridian.live import AWSLiveScanner
         account_ids = None
         if args.accounts:
             account_ids = [a.strip() for a in args.accounts.split(",") if a.strip()]
@@ -283,7 +283,7 @@ def main():
     paths_list = []
 
     if args.graph:
-        from cloudguard.graph import build_iam_graph, find_attack_paths, graph_to_dict
+        from meridian.graph import build_iam_graph, find_attack_paths, graph_to_dict
         graph_obj  = build_iam_graph(cg.get_policies())
         paths_list = find_attack_paths(graph_obj)
 
@@ -310,11 +310,11 @@ def main():
 
     # ── Layer 3: Exploits ──────────────────────────────────────
     if args.exploits is not None:
-        from cloudguard.exploits import ExploitGenerator, write_exploits
+        from meridian.exploits import ExploitGenerator, write_exploits
         gen = ExploitGenerator()
         scripts = gen.generate_all(filtered)
         if paths_list:
-            from cloudguard.graph import graph_to_dict
+            from meridian.graph import graph_to_dict
             for i, path in enumerate(paths_list[:5]):  # top 5 paths
                 fname = f"poc_graph_path_{i+1}.py"
                 scripts[fname] = gen.generate_path_script(path)
@@ -322,14 +322,14 @@ def main():
 
     # ── Layer 3: Remediation ───────────────────────────────────
     if args.remediate is not None:
-        from cloudguard.remediate import RemediationGenerator, write_remediation
+        from meridian.remediate import RemediationGenerator, write_remediation
         remgen  = RemediationGenerator()
         snippets = remgen.generate_all(filtered)
         write_remediation(snippets, args.remediate, dry_run=args.dry_run)
 
     # ── Layer 5: Monitor ───────────────────────────────────────
     if args.monitor:
-        from cloudguard.monitor import CloudTrailMonitor
+        from meridian.monitor import CloudTrailMonitor
         monitor = CloudTrailMonitor()
         events  = monitor.pull_events(hours=args.monitor_hours)
         anomalies = monitor.analyze_anomalies(events)
@@ -345,7 +345,7 @@ def main():
                 file=sys.stderr,
             )
             sys.exit(1)
-        from cloudguard.monitor import HoneypotDeployer
+        from meridian.monitor import HoneypotDeployer
         deployer = HoneypotDeployer(org_id=args.org_id)
         role_arn = deployer.deploy(bucket_name=args.honeypot_bucket)
         print(f"\n  Honeypot role ARN: {role_arn}")
@@ -353,7 +353,7 @@ def main():
 
     # ── Layer 4: Dashboard (blocking — must be last) ───────────
     if args.dashboard:
-        from cloudguard.dashboard.app import run_dashboard
+        from meridian.dashboard.app import run_dashboard
 
         run_dashboard(
             policies=cg.get_policies(),

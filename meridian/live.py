@@ -1,8 +1,8 @@
 """
-cloudguard/live.py
-~~~~~~~~~~~~~~~~~~
+meridian/live.py
+~~~~~~~~~~~~~~~~
 Live AWS IAM scanner.  Pulls all IAM policies from a live account using boto3
-and feeds them into CloudGuard's dict-based loader.
+and feeds them into Meridian's dict-based loader.
 
 Authentication uses the standard AWS SDK credential chain — no credentials are
 ever hardcoded:
@@ -12,16 +12,16 @@ ever hardcoded:
   4. AWS SSO / IAM Identity Center
 
 Multi-account support: provide a list of account IDs to scan via
---accounts.  CloudGuard will call sts:AssumeRole on the specified role name
+--accounts.  Meridian will call sts:AssumeRole on the specified role name
 (default: OrganizationAccountAccessRole) in each account.
 
 Usage:
     scanner = AWSLiveScanner(profile="my-profile")
     policies = scanner.pull_all_policies()
-    cg = CloudGuard()
+    m = Meridian()
     for name, doc in policies.items():
-        cg.load_dict(name, doc)
-    findings = cg.analyze()
+        m.load_dict(name, doc)
+    findings = m.analyze()
 """
 
 from __future__ import annotations

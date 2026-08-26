@@ -23,7 +23,7 @@ try:
 except ImportError:
     HAS_FLASK = False
 
-from cloudguard.core import Finding, SEVERITY_ORDER
+from meridian.core import Finding, SEVERITY_ORDER
 
 
 def create_app(
@@ -80,9 +80,9 @@ def create_app(
 
     # 2. Build graph elements from severity-filtered findings/policies if policies supplied
     if policies is not None:
-        from cloudguard.graph import build_iam_graph, find_attack_paths, graph_to_dict
+        from meridian.graph import build_iam_graph, find_attack_paths, graph_to_dict
         from pathlib import Path
-        from cloudguard.core import normalize_to_list
+        from meridian.core import normalize_to_list
 
         if severity and filtered_findings:
             target_files = {str(f.policy_file) for f in filtered_findings}
@@ -296,7 +296,7 @@ def run_dashboard(
             webbrowser.open(f"http://{host}:{port}")
         threading.Thread(target=_open, daemon=True).start()
 
-    print(f"\n  CloudGuard Dashboard running at http://{host}:{port}")
+    print(f"\n  Meridian Dashboard running at http://{host}:{port}")
     print("  Press Ctrl-C to stop.\n")
     app.run(host=host, port=port, debug=False, use_reloader=False)
 

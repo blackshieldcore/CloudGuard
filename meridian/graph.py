@@ -25,8 +25,8 @@ try:
 except ImportError:
     HAS_NETWORKX = False
 
-from cloudguard.core import normalize_to_list
-from cloudguard.rules import PRIVESC_ACTIONS, HIGH_RISK_SERVICES
+from meridian.core import normalize_to_list
+from meridian.rules import PRIVESC_ACTIONS, HIGH_RISK_SERVICES
 
 
 # ──────────────────────────────────────────────

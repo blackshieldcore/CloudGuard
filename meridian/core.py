@@ -1,9 +1,9 @@
 """
-cloudguard/core.py
-~~~~~~~~~~~~~~~~~~
-Core CloudGuard class, Finding data model, and policy loading utilities.
+meridian/core.py
+~~~~~~~~~~~~~~~~
+Core Meridian class, Finding data model, and policy loading utilities.
 
-The CloudGuard class is the central object — it accepts policies from files,
+The Meridian class is the central object — it accepts policies from files,
 directories, or raw dicts (for live AWS ingestion), runs all rules, and returns
 Finding objects.
 """
@@ -20,7 +20,7 @@ from typing import Dict, List, Optional
 # ──────────────────────────────────────────────
 
 class Finding:
-    """Represents a single risk finding.  Identical to original cloudguard.py."""
+    """Represents a single risk finding."""
 
     def __init__(self, severity, rule_id, title, detail, policy_file, statement_idx):
         self.severity = severity        # CRITICAL, HIGH, MEDIUM, LOW, INFO
@@ -87,22 +87,22 @@ def parse_policy_file(filepath) -> Optional[dict]:
 
 
 # ──────────────────────────────────────────────
-# CloudGuard — main analysis engine
+# Meridian — main analysis engine
 # ──────────────────────────────────────────────
 
-class CloudGuard:
+class Meridian:
     """
     Central analysis engine.
 
-    Usage (file-based — same as original):
-        cg = CloudGuard()
-        cg.load_dir("policies/")
-        findings = cg.analyze()
+    Usage (file-based):
+        m = Meridian()
+        m.load_dir("policies/")
+        findings = m.analyze()
 
     Usage (dict-based — for live AWS ingestion):
-        cg = CloudGuard()
-        cg.load_dict("MyRolePolicy", policy_doc_dict)
-        findings = cg.analyze()
+        m = Meridian()
+        m.load_dict("MyRolePolicy", policy_doc_dict)
+        findings = m.analyze()
     """
 
     def __init__(self):
@@ -146,7 +146,6 @@ class CloudGuard:
     def load_path(self, target_path: str):
         """
         Smart loader: detects whether target_path is a file or directory.
-        Mirrors the original scan_path() logic for backward compatibility.
         """
         target = Path(target_path)
         if target.is_file():
@@ -163,8 +162,7 @@ class CloudGuard:
         Run all detection rules against every loaded policy.
         Returns a flat list of Finding objects, sorted by severity descending.
         """
-        # Import here to avoid circular import (rules imports core)
-        from cloudguard.rules import ALL_RULES
+        from meridian.rules import ALL_RULES
 
         all_findings: List[Finding] = []
         for name, policy_doc in self._policies.items():
@@ -182,6 +180,10 @@ class CloudGuard:
         return self._policies
 
 
+# Backward-compatibility alias
+CloudGuard = Meridian
+
+
 # ──────────────────────────────────────────────
 # Backward-compat functional API
 # ──────────────────────────────────────────────
@@ -189,18 +191,18 @@ class CloudGuard:
 def scan_path(target_path: str) -> List[Finding]:
     """
     Backward-compatible wrapper.
-    Mirrors original scan_path() — used by tests and the shim cloudguard.py.
+    Used by tests and the shim meridian.py.
     """
-    cg = CloudGuard()
-    cg.load_path(target_path)
-    return cg.analyze()
+    m = Meridian()
+    m.load_path(target_path)
+    return m.analyze()
 
 
 def analyze_policy(policy_doc: dict, filename: str) -> List[Finding]:
     """Backward-compatible wrapper for analyze_policy()."""
-    cg = CloudGuard()
-    cg.load_dict(filename, policy_doc)
-    return cg.analyze()
+    m = Meridian()
+    m.load_dict(filename, policy_doc)
+    return m.analyze()
 
 
 # ──────────────────────────────────────────────

@@ -18,7 +18,7 @@ import threading
 from typing import Any, Dict, List, Optional
 
 try:
-    from flask import Flask, jsonify, render_template, request
+    from flask import Flask, jsonify, render_template, request, send_from_directory
     HAS_FLASK = True
 except ImportError:
     HAS_FLASK = False
@@ -214,6 +214,10 @@ def create_app(
                 for p in paths
             ]),
         )
+
+    @app.route("/favicon.ico")
+    def favicon_ico():
+        return send_from_directory(os.path.join(app.root_path, "static"), "favicon.ico", mimetype="image/vnd.microsoft.icon")
 
     @app.route("/report.json")
     def report_json():
